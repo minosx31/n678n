@@ -1,37 +1,33 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
 import { useGlobalState } from "@/context/global-state"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Shield, User, UserCheck, Workflow } from "lucide-react"
+
+const roleConfig = {
+  admin: { name: "Alex Admin", route: "/admin" },
+  employee: { name: "Emily Employee", route: "/portal" },
+  approver: { name: "Mike Manager", route: "/approvals" },
+}
 
 export default function LandingPage() {
   const router = useRouter()
   const { currentUser, setCurrentUser } = useGlobalState()
 
-  const handleLogin = (role: "admin" | "employee" | "approver") => {
-    const names = {
-      admin: "Alex Admin",
-      employee: "Emily Employee",
-      approver: "Mike Manager",
+  useEffect(() => {
+    if (currentUser?.role) {
+      router.push(roleConfig[currentUser.role].route)
     }
-    setCurrentUser({ name: names[role], role })
-    const routes = {
-      admin: "/admin",
-      employee: "/portal",
-      approver: "/approvals",
-    }
-    router.push(routes[role])
+  }, [currentUser, router])
+
+  const handleSetUser = (role: "admin" | "employee" | "approver") => {
+    setCurrentUser({ name: roleConfig[role].name, role })
   }
 
   if (currentUser) {
-    const routes = {
-      admin: "/admin",
-      employee: "/portal",
-      approver: "/approvals",
-    }
-    router.push(routes[currentUser.role!])
     return null
   }
 
@@ -52,10 +48,10 @@ export default function LandingPage() {
             <CardDescription>Choose a role to explore the system</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button
-              variant="outline"
-              className="w-full h-14 justify-start gap-4 hover:bg-primary/10 hover:border-primary bg-transparent"
-              onClick={() => handleLogin("admin")}
+            <Link
+              href="/admin"
+              onClick={() => handleSetUser("admin")}
+              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-primary/10 hover:border-primary bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                 <Shield className="h-5 w-5 text-primary" />
@@ -64,12 +60,12 @@ export default function LandingPage() {
                 <div className="font-semibold">Login as IT Admin</div>
                 <div className="text-xs text-muted-foreground">Build and manage approval processes</div>
               </div>
-            </Button>
+            </Link>
 
-            <Button
-              variant="outline"
-              className="w-full h-14 justify-start gap-4 hover:bg-accent/10 hover:border-accent bg-transparent"
-              onClick={() => handleLogin("employee")}
+            <Link
+              href="/portal"
+              onClick={() => handleSetUser("employee")}
+              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-accent/10 hover:border-accent bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
                 <User className="h-5 w-5 text-accent" />
@@ -78,12 +74,12 @@ export default function LandingPage() {
                 <div className="font-semibold">Login as Employee</div>
                 <div className="text-xs text-muted-foreground">Submit and track your requests</div>
               </div>
-            </Button>
+            </Link>
 
-            <Button
-              variant="outline"
-              className="w-full h-14 justify-start gap-4 hover:bg-warning/10 hover:border-warning bg-transparent"
-              onClick={() => handleLogin("approver")}
+            <Link
+              href="/approvals"
+              onClick={() => handleSetUser("approver")}
+              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-warning/10 hover:border-warning bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
                 <UserCheck className="h-5 w-5 text-warning" />
@@ -92,7 +88,7 @@ export default function LandingPage() {
                 <div className="font-semibold">Login as Manager</div>
                 <div className="text-xs text-muted-foreground">Review and approve pending requests</div>
               </div>
-            </Button>
+            </Link>
           </CardContent>
         </Card>
 
