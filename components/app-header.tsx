@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useGlobalState } from "@/context/global-state"
 import { Button } from "@/components/ui/button"
@@ -28,7 +29,7 @@ export function AppHeader({ title }: AppHeaderProps) {
   }
 
   const roleLabels = {
-    admin: "IT Admin",
+    admin: "Admin",
     employee: "Employee",
     approver: "Manager",
   }
@@ -36,10 +37,10 @@ export function AppHeader({ title }: AppHeaderProps) {
   return (
     <header className="border-b border-border bg-sidebar">
       <div className="flex h-14 items-center justify-between px-6">
-        <div className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           <Workflow className="h-6 w-6 text-primary" />
           <span className="font-semibold text-lg">{title}</span>
-        </div>
+        </Link>
         <div className="flex items-center gap-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -58,7 +59,7 @@ export function AppHeader({ title }: AppHeaderProps) {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Sign Out</span>
               </DropdownMenuItem>

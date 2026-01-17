@@ -65,7 +65,7 @@ export default function LandingPage() {
             <Link
               href="/portal"
               onClick={() => handleSetUser("employee")}
-              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-accent/10 hover:border-accent bg-transparent transition-colors"
+              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-success/10 hover:border-success bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
                 <User className="h-5 w-5 text-accent" />
