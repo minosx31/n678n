@@ -12,7 +12,29 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FileText, Send, Clock, CheckCircle2, XCircle, ChevronRight } from "lucide-react"
+import { Separator } from "@/components/ui/separator"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  FileText,
+  Send,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  ChevronRight,
+  User,
+  Bot,
+  AlertCircle,
+  MessageSquare,
+  UserCheck,
+  Eye,
+} from "lucide-react"
 
 export default function PortalPage() {
   const router = useRouter()
@@ -20,6 +42,7 @@ export default function PortalPage() {
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
+  const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "employee") {
@@ -36,14 +59,42 @@ export default function PortalPage() {
   const handleSubmit = () => {
     if (!selectedProcess) return
 
+    const now = new Date().toISOString()
     const newRequest: Request = {
       id: `req-${Date.now()}`,
       processId: selectedProcess.id,
       processName: selectedProcess.name,
       submittedBy: currentUser.name,
-      submittedAt: new Date().toISOString(),
+      submittedAt: now,
       status: "Pending",
       data: formData,
+      timeline: [
+        {
+          id: `evt-${Date.now()}`,
+          timestamp: now,
+          type: "submitted",
+          title: "Request Submitted",
+          description: "Your request has been submitted for processing",
+          actor: currentUser.name,
+          status: "completed",
+        },
+        {
+          id: `evt-${Date.now() + 1}`,
+          timestamp: new Date(Date.now() + 2000).toISOString(),
+          type: "auto_check",
+          title: "Automated Checks",
+          description: "Running automated validation and risk assessment",
+          status: "completed",
+        },
+        {
+          id: `evt-${Date.now() + 2}`,
+          timestamp: new Date(Date.now() + 5000).toISOString(),
+          type: "pending_approval",
+          title: "Pending Approval",
+          description: "Waiting for manager review",
+          status: "current",
+        },
+      ],
     }
 
     addRequest(newRequest)
@@ -77,6 +128,30 @@ export default function PortalPage() {
         {status}
       </Badge>
     )
+  }
+
+  const getTimelineIcon = (type: string) => {
+    switch (type) {
+      case "submitted":
+        return <Send className="h-3 w-3" />
+      case "auto_check":
+        return <Bot className="h-3 w-3" />
+      case "pending_approval":
+        return <Clock className="h-3 w-3" />
+      case "approved":
+        return <CheckCircle2 className="h-3 w-3" />
+      case "rejected":
+        return <XCircle className="h-3 w-3" />
+      default:
+        return <AlertCircle className="h-3 w-3" />
+    }
+  }
+
+  const getTimelineColor = (status: string, type: string) => {
+    if (status === "current") return "bg-warning text-warning-foreground"
+    if (type === "approved") return "bg-success text-success-foreground"
+    if (type === "rejected") return "bg-destructive text-destructive-foreground"
+    return "bg-primary/20 text-primary"
   }
 
   return (
@@ -113,7 +188,7 @@ export default function PortalPage() {
                         setFormData({})
                         setSubmitted(false)
                       }}
-                      className={`w-full flex items-center justify-between p-4 rounded-lg border transition-colors text-left ${
+                      className={`w-full flex items-center justify-between p-4 rounded-lg border transition-colors text-left cursor-pointer ${
                         selectedProcess?.id === process.id
                           ? "border-primary bg-primary/5"
                           : "border-border bg-secondary/50 hover:bg-secondary"
@@ -231,7 +306,8 @@ export default function PortalPage() {
                     {myRequests.map((request) => (
                       <div
                         key={request.id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/50"
+                        className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/50 cursor-pointer hover:bg-secondary/70 transition-colors"
+                        onClick={() => setViewingRequest(request)}
                       >
                         <div className="flex items-center gap-3">
                           {getStatusIcon(request.status)}
@@ -242,7 +318,10 @@ export default function PortalPage() {
                             </p>
                           </div>
                         </div>
-                        {getStatusBadge(request.status)}
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(request.status)}
+                          <Eye className="h-4 w-4 text-muted-foreground" />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -259,6 +338,125 @@ export default function PortalPage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* View Request Details with Timeline */}
+      <Dialog open={!!viewingRequest} onOpenChange={() => setViewingRequest(null)}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              {viewingRequest?.processName}
+            </DialogTitle>
+            <DialogDescription>
+              Request {viewingRequest?.id} · Submitted on{" "}
+              {viewingRequest && new Date(viewingRequest.submittedAt).toLocaleDateString()}
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewingRequest && (
+            <div className="space-y-4">
+              {/* Status */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div className="flex items-center gap-2">
+                  {getStatusIcon(viewingRequest.status)}
+                  <span className="font-medium">{viewingRequest.status}</span>
+                </div>
+                {viewingRequest.decidedBy && viewingRequest.decidedAt && (
+                  <div className="text-sm text-muted-foreground flex items-center gap-1">
+                    <UserCheck className="h-3 w-3" />
+                    {viewingRequest.decidedBy} · {new Date(viewingRequest.decidedAt).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+
+              {viewingRequest.remarks && (
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-1">
+                    <MessageSquare className="h-4 w-4" />
+                    Approver Remarks
+                  </div>
+                  <p className="text-sm text-muted-foreground">{viewingRequest.remarks}</p>
+                </div>
+              )}
+
+              {/* Request Details */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2">Request Details</h4>
+                <div className="p-3 rounded-lg bg-secondary/50 space-y-2">
+                  {Object.entries(viewingRequest.data).map(([key, value]) => (
+                    <div key={key} className="flex justify-between text-sm">
+                      <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
+                      <span className="font-medium text-right max-w-[60%]">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Timeline */}
+              <div>
+                <h4 className="text-sm font-semibold mb-3">Process Timeline</h4>
+                <div className="relative">
+                  {viewingRequest.timeline.map((event, index) => (
+                    <div key={event.id} className="flex gap-3 pb-4 last:pb-0">
+                      {/* Timeline line */}
+                      <div className="flex flex-col items-center">
+                        <div
+                          className={`flex h-6 w-6 items-center justify-center rounded-full ${getTimelineColor(
+                            event.status,
+                            event.type
+                          )}`}
+                        >
+                          {getTimelineIcon(event.type)}
+                        </div>
+                        {index < viewingRequest.timeline.length - 1 && (
+                          <div className="w-px flex-1 bg-border mt-1" />
+                        )}
+                      </div>
+
+                      {/* Timeline content */}
+                      <div className="flex-1 pb-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium">{event.title}</p>
+                          <div className="flex items-center gap-2">
+                            {event.status === "current" && (
+                              <Badge variant="secondary" className="text-xs">
+                                In Progress
+                              </Badge>
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(event.timestamp).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                        {event.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{event.description}</p>
+                        )}
+                        {event.actor && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                            <User className="h-3 w-3" />
+                            {event.actor}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingRequest(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
