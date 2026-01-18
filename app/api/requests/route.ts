@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import type { Request } from "@/context/global-state"
+import type { Request, TimelineEvent } from "@/context/global-state"
 
 // In-memory store (replace with database in production)
-let requestsStore: Request[] = []
+const requestsStore: Request[] = []
 
 // GET - Fetch all requests with optional filters
 export async function GET(request: NextRequest) {
@@ -43,14 +43,46 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const now = new Date().toISOString()
+    
+    // Create initial timeline events
+    const timeline: TimelineEvent[] = [
+      {
+        id: `evt-${Date.now()}`,
+        timestamp: now,
+        type: "submitted",
+        title: "Request Submitted",
+        description: "Request was submitted for processing",
+        actor: body.submittedBy,
+        status: "completed",
+      },
+      {
+        id: `evt-${Date.now() + 1}`,
+        timestamp: new Date(Date.now() + 2000).toISOString(),
+        type: "auto_check",
+        title: "Automated Checks",
+        description: "Running automated validation and risk assessment",
+        status: "completed",
+      },
+      {
+        id: `evt-${Date.now() + 2}`,
+        timestamp: new Date(Date.now() + 5000).toISOString(),
+        type: "pending_approval",
+        title: "Pending Approval",
+        description: "Waiting for manager review",
+        status: "current",
+      },
+    ]
+
     const newRequest: Request = {
       id: `req-${Date.now()}`,
       processId: body.processId,
       processName: body.processName,
       submittedBy: body.submittedBy,
-      submittedAt: new Date().toISOString(),
+      submittedAt: now,
       status: "Pending",
       data: body.data,
+      timeline,
     }
 
     requestsStore.push(newRequest)
