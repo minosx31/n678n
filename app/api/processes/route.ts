@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import type { Process } from "@/context/global-state"
 
 // In-memory store (replace with database in production)
-let processesStore: Process[] = []
+const processesStore: Process[] = []
 
 // GET - Fetch all processes
 export async function GET() {
@@ -17,19 +17,30 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    if (!body.name || !body.fields || !body.steps) {
+    if (!body.name || !body.formDefinition || !body.policies || !body.agentConfig) {
       return NextResponse.json(
-        { error: "Missing required fields: name, fields, steps" },
+        { error: "Missing required fields: name, formDefinition, policies, agentConfig" },
         { status: 400 }
       )
     }
 
+    const processId = body.processId || body.id || `process-${Date.now()}`
+    const now = new Date().toISOString()
+
     const newProcess: Process = {
-      id: body.id || `process-${Date.now()}`,
+      processId,
+      createdAt: body.createdAt || now,
       name: body.name,
       description: body.description || "",
-      fields: body.fields,
-      steps: body.steps,
+      version: body.version || "v1.0",
+      formDefinition: body.formDefinition,
+      policies: body.policies,
+      riskDefinitions: body.riskDefinitions || [],
+      agentConfig: body.agentConfig,
+      // Legacy compatibility
+      id: body.id || processId,
+      fields: body.fields || body.formDefinition?.fields,
+      steps: body.steps || [],
     }
 
     processesStore.push(newProcess)

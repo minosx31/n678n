@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useGlobalState, type Process, type FormField, type WorkflowStep } from "@/context/global-state"
+import { useGlobalState, type Process, type FormField, type RiskDefinition } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -48,14 +48,51 @@ import {
   ChevronUp,
 } from "lucide-react"
 
+const firewallId = `firewall-${Date.now()}`
+const softwareId = `software-${Date.now()}`
+
 const firewallJson: Process = {
-  id: `firewall-${Date.now()}`,
+  processId: firewallId,
+  createdAt: new Date().toISOString(),
   name: "Firewall Access Request",
   description: "Opens ports for external IPs.",
+  version: "v1.0",
+  formDefinition: {
+    title: "Firewall Access Request",
+    description: "Provide firewall access details.",
+    fields: [
+      { fieldId: "sourceIp", key: "source_ip", label: "Source IP", type: "text", placeholder: "192.168.x.x", required: true },
+      { fieldId: "port", key: "port", label: "Destination Port", type: "number", placeholder: "443", required: true },
+      { fieldId: "reason", key: "reason", label: "Business Justification", type: "textarea", required: true },
+    ],
+  },
+  policies: [
+    {
+      policyId: "POLICY-SECURITY-001",
+      policyText: "High-risk ports require manager approval.",
+      type: "business-rule",
+      severity: "high",
+    },
+  ],
+  riskDefinitions: [
+    {
+      riskId: "RISK-PORT-001",
+      riskDefinition: "Risk increases for sensitive ports and untrusted IP ranges.",
+      thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+      description: "Port and IP based risk scoring.",
+    },
+  ],
+  agentConfig: {
+    allowHumanOverride: true,
+    defaultDecision: "H",
+    confidenceThreshold: 0.9,
+  },
+  // Legacy compatibility
+  id: firewallId,
   fields: [
-    { key: "source_ip", label: "Source IP", type: "text", placeholder: "192.168.x.x" },
-    { key: "port", label: "Destination Port", type: "number", placeholder: "443" },
-    { key: "reason", label: "Business Justification", type: "textarea" },
+    { fieldId: "sourceIp", key: "source_ip", label: "Source IP", type: "text", placeholder: "192.168.x.x" },
+    { fieldId: "port", key: "port", label: "Destination Port", type: "number", placeholder: "443" },
+    { fieldId: "reason", key: "reason", label: "Business Justification", type: "textarea" },
   ],
   steps: [
     { name: "AI Risk Analysis", action: "check_ip_reputation" },
@@ -64,14 +101,49 @@ const firewallJson: Process = {
 }
 
 const softwareJson: Process = {
-  id: `software-${Date.now()}`,
+  processId: softwareId,
+  createdAt: new Date().toISOString(),
   name: "Software Installation Request",
   description: "Request installation of new software on your workstation.",
+  version: "v1.0",
+  formDefinition: {
+    title: "Software Installation Request",
+    description: "Provide software request details.",
+    fields: [
+      { fieldId: "softwareName", key: "software_name", label: "Software Name", type: "text", placeholder: "e.g., Visual Studio Code", required: true },
+      { fieldId: "version", key: "version", label: "Version", type: "text", placeholder: "e.g., Latest", required: true },
+      { fieldId: "licenseType", key: "license_type", label: "License Type", type: "select", options: ["Free", "Paid", "Enterprise"], required: true },
+      { fieldId: "justification", key: "justification", label: "Business Justification", type: "textarea", required: true },
+    ],
+  },
+  policies: [
+    {
+      policyId: "POLICY-LICENSE-001",
+      policyText: "Paid software requires IT approval.",
+      type: "business-rule",
+      severity: "medium",
+    },
+  ],
+  riskDefinitions: [
+    {
+      riskId: "RISK-SOFTWARE-001",
+      riskDefinition: "Risk increases for paid or unverified software.",
+      thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+      description: "Software compliance risk scoring.",
+    },
+  ],
+  agentConfig: {
+    allowHumanOverride: true,
+    defaultDecision: "H",
+    confidenceThreshold: 0.9,
+  },
+  // Legacy compatibility
+  id: softwareId,
   fields: [
-    { key: "software_name", label: "Software Name", type: "text", placeholder: "e.g., Visual Studio Code" },
-    { key: "version", label: "Version", type: "text", placeholder: "e.g., Latest" },
-    { key: "license_type", label: "License Type", type: "select", options: ["Free", "Paid", "Enterprise"] },
-    { key: "justification", label: "Business Justification", type: "textarea" },
+    { fieldId: "softwareName", key: "software_name", label: "Software Name", type: "text", placeholder: "e.g., Visual Studio Code" },
+    { fieldId: "version", key: "version", label: "Version", type: "text", placeholder: "e.g., Latest" },
+    { fieldId: "licenseType", key: "license_type", label: "License Type", type: "select", options: ["Free", "Paid", "Enterprise"] },
+    { fieldId: "justification", key: "justification", label: "Business Justification", type: "textarea" },
   ],
   steps: [
     { name: "Security Scan", action: "scan_software_registry" },
@@ -80,27 +152,22 @@ const softwareJson: Process = {
   ],
 }
 
-const FIELD_TYPES = ["text", "number", "textarea", "select"] as const
-const ACTION_TYPES = [
-  "verify_ip_reputation",
-  "check_budget_availability",
-  "check_software_license",
-  "manager_approval",
-  "security_team_approval",
-  "auto_approve",
-  "send_notification",
-  "check_inventory",
-] as const
-
+const FIELD_TYPES = ["text", "number", "textarea", "select", "email", "array"] as const
 export default function AdminPage() {
   const router = useRouter()
   const { currentUser, processes, addProcess, updateProcess, deleteProcess } = useGlobalState()
   const [activeTab, setActiveTab] = useState("create")
+  const configApiUrl = process.env.NEXT_PUBLIC_CONFIG_API_URL
   
   // Create process state
   const [input, setInput] = useState("")
+  const [referenceName, setReferenceName] = useState<string | null>(null)
+  const [referenceText, setReferenceText] = useState<string>("")
+  const [isReadingReference, setIsReadingReference] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedProcess, setGeneratedProcess] = useState<Process | null>(null)
+  const [generatedFields, setGeneratedFields] = useState<FormField[]>([])
+  const [generatedRisks, setGeneratedRisks] = useState<RiskDefinition[]>([])
   const [saved, setSaved] = useState(false)
   const [showPreview, setShowPreview] = useState(true)
 
@@ -114,8 +181,8 @@ export default function AdminPage() {
     name: string
     description: string
     fields: FormField[]
-    steps: WorkflowStep[]
-  }>({ name: "", description: "", fields: [], steps: [] })
+    risks: RiskDefinition[]
+  }>({ name: "", description: "", fields: [], risks: [] })
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "admin") {
@@ -127,16 +194,22 @@ export default function AdminPage() {
     return null
   }
 
+  const getProcessKey = (process: Process) => process.processId || process.id || process.name
+  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
+  const getProcessRisks = (process: Process) => process.riskDefinitions ?? []
+
   const handleGenerate = async () => {
     setIsGenerating(true)
     setSaved(false)
     setGeneratedProcess(null)
+    setGeneratedFields([])
+    setGeneratedRisks([])
 
     try {
       const response = await fetch("/api/generate-process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: input }),
+        body: JSON.stringify({ description: input, referenceText }),
       })
 
       if (!response.ok) {
@@ -145,20 +218,81 @@ export default function AdminPage() {
 
       const data = await response.json()
       setGeneratedProcess(data.process)
+      setGeneratedFields(getProcessFields(data.process))
+      setGeneratedRisks(data.process.riskDefinitions || [])
     } catch (error) {
       console.error("Error generating process:", error)
       const lowerInput = input.toLowerCase()
       if (lowerInput.includes("firewall")) {
-        setGeneratedProcess({ ...firewallJson, id: `firewall-${Date.now()}` })
+        const fallbackId = `firewall-${Date.now()}`
+        const fallbackProcess: Process = {
+          ...firewallJson,
+          processId: fallbackId,
+          id: fallbackId,
+          createdAt: new Date().toISOString(),
+        }
+        setGeneratedProcess(fallbackProcess)
+        setGeneratedFields(getProcessFields(fallbackProcess))
+        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
       } else if (lowerInput.includes("software")) {
-        setGeneratedProcess({ ...softwareJson, id: `software-${Date.now()}` })
+        const fallbackId = `software-${Date.now()}`
+        const fallbackProcess: Process = {
+          ...softwareJson,
+          processId: fallbackId,
+          id: fallbackId,
+          createdAt: new Date().toISOString(),
+        }
+        setGeneratedProcess(fallbackProcess)
+        setGeneratedFields(getProcessFields(fallbackProcess))
+        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
       } else {
-        setGeneratedProcess({
-          id: `process-${Date.now()}`,
+        const fallbackId = `process-${Date.now()}`
+        const fallbackProcess: Process = {
+          processId: fallbackId,
+          createdAt: new Date().toISOString(),
           name: "Generic Approval Process",
           description: "A custom approval workflow generated from your description.",
+          version: "v1.0",
+          formDefinition: {
+            title: "Generic Approval Process",
+            description: "Provide details for your request.",
+            fields: [
+              {
+                fieldId: "requestDetails",
+                key: "request_details",
+                label: "Request Details",
+                type: "textarea",
+                placeholder: "Describe your request...",
+                required: true,
+              },
+            ],
+          },
+          policies: [
+            {
+              policyId: "POLICY-GENERIC-001",
+              policyText: "Requests require review when risk exceeds threshold.",
+              type: "business-rule",
+              severity: "medium",
+            },
+          ],
+          riskDefinitions: [
+            {
+              riskId: "RISK-GENERIC-001",
+              riskDefinition: "Risk is based on request complexity and impact.",
+              thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+              description: "Generic risk scoring.",
+            },
+          ],
+          agentConfig: {
+            allowHumanOverride: true,
+            defaultDecision: "H",
+            confidenceThreshold: 0.9,
+          },
+          // Legacy compatibility
+          id: fallbackId,
           fields: [
             {
+              fieldId: "requestDetails",
               key: "request_details",
               label: "Request Details",
               type: "textarea",
@@ -169,16 +303,79 @@ export default function AdminPage() {
             { name: "Initial Review", action: "auto_review" },
             { name: "Manager Approval", condition: "requires_approval" },
           ],
-        })
+        }
+        setGeneratedProcess(fallbackProcess)
+        setGeneratedFields(getProcessFields(fallbackProcess))
+        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
       }
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const handleSave = () => {
+  const samplePrompt =
+    "We need an approval process for firewall changes. Collect source IP, destination IP, port, protocol, and business justification. " +
+    "Run automated IP reputation checks and flag high-risk ports (22, 3389) for security review. " +
+    "Auto-approve low-risk requests; route medium risk to manager; high risk to security team."
+
+  const handleUseSamplePrompt = () => {
+    setInput(samplePrompt)
+  }
+
+  const handleReferenceUpload = (file: File | null) => {
+    if (!file) {
+      setReferenceName(null)
+      setReferenceText("")
+      return
+    }
+
+    setIsReadingReference(true)
+    setReferenceName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      setReferenceText(result)
+      setIsReadingReference(false)
+    }
+    reader.onerror = () => {
+      setReferenceText("")
+      setIsReadingReference(false)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleSave = async () => {
     if (generatedProcess) {
-      addProcess(generatedProcess)
+      const updatedProcess: Process = {
+        ...generatedProcess,
+        formDefinition: {
+          title: generatedProcess.formDefinition?.title || generatedProcess.name,
+          description: generatedProcess.formDefinition?.description || generatedProcess.description,
+          fields: generatedFields,
+        },
+        riskDefinitions: generatedRisks,
+        fields: generatedFields,
+      }
+      if (configApiUrl) {
+        try {
+          await fetch(configApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              process: updatedProcess,
+              referenceDocument: referenceName
+                ? {
+                    name: referenceName,
+                    content: referenceText,
+                  }
+                : null,
+            }),
+          })
+        } catch (error) {
+          console.error("Failed to save process to config API:", error)
+        }
+      }
+      addProcess(updatedProcess)
       setSaved(true)
       setTimeout(() => {
         setActiveTab("manage")
@@ -195,19 +392,27 @@ export default function AdminPage() {
     setEditForm({
       name: process.name,
       description: process.description,
-      fields: [...process.fields],
-      steps: [...process.steps],
+      fields: [...getProcessFields(process)],
+      risks: [...getProcessRisks(process)],
     })
   }
 
   const handleSaveEdit = () => {
     if (editingProcess) {
+      const updatedFormDefinition = editingProcess.formDefinition
+        ? { ...editingProcess.formDefinition, fields: editForm.fields }
+        : {
+            title: editForm.name,
+            description: editForm.description,
+            fields: editForm.fields,
+          }
       updateProcess({
         ...editingProcess,
         name: editForm.name,
         description: editForm.description,
+        formDefinition: updatedFormDefinition,
         fields: editForm.fields,
-        steps: editForm.steps,
+        riskDefinitions: editForm.risks,
       })
       setEditingProcess(null)
     }
@@ -219,7 +424,7 @@ export default function AdminPage() {
 
   const confirmDelete = () => {
     if (deletingProcess) {
-      deleteProcess(deletingProcess.id)
+      deleteProcess(deletingProcess.processId || deletingProcess.id || deletingProcess.name)
       setDeletingProcess(null)
     }
   }
@@ -227,6 +432,7 @@ export default function AdminPage() {
   // Field editing helpers
   const addField = () => {
     const newField: FormField = {
+      fieldId: `field${Date.now()}`,
       key: `field_${Date.now()}`,
       label: "New Field",
       type: "text",
@@ -239,6 +445,15 @@ export default function AdminPage() {
     const newFields = [...editForm.fields]
     newFields[index] = { ...newFields[index], ...updates }
     if (updates.label) {
+      const normalized = updates.label
+        .trim()
+        .replace(/[^a-zA-Z0-9 ]/g, "")
+        .split(/\s+/)
+        .filter(Boolean)
+      const fieldId = normalized
+        .map((word, i) => (i === 0 ? word.toLowerCase() : word[0]?.toUpperCase() + word.slice(1).toLowerCase()))
+        .join("")
+      newFields[index].fieldId = fieldId || newFields[index].fieldId
       newFields[index].key = updates.label.toLowerCase().replace(/\s+/g, "_")
     }
     setEditForm({ ...editForm, fields: newFields })
@@ -256,32 +471,122 @@ export default function AdminPage() {
     setEditForm({ ...editForm, fields: newFields })
   }
 
-  // Step editing helpers
-  const addStep = () => {
-    const newStep: WorkflowStep = {
-      name: "New Step",
-      action: undefined,
-      condition: undefined,
+  // Risk editing helpers (existing process)
+  const addEditRisk = () => {
+    setEditForm((prev) => ({
+      ...prev,
+      risks: [
+        ...prev.risks,
+        {
+          riskId: `RISK-${Date.now()}`,
+          riskDefinition: "Describe how this risk is calculated",
+          thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+          description: "",
+        },
+      ],
+    }))
+  }
+
+  const updateEditRisk = (index: number, updates: Partial<RiskDefinition>) => {
+    setEditForm((prev) => {
+      const risks = [...prev.risks]
+      risks[index] = { ...risks[index], ...updates }
+      return { ...prev, risks }
+    })
+  }
+
+  const updateEditRiskThreshold = (index: number, key: "low" | "medium" | "high", value: number) => {
+    setEditForm((prev) => {
+      const risks = [...prev.risks]
+      risks[index] = {
+        ...risks[index],
+        thresholds: { ...risks[index].thresholds, [key]: value },
+      }
+      return { ...prev, risks }
+    })
+  }
+
+  const removeEditRisk = (index: number) => {
+    setEditForm((prev) => ({ ...prev, risks: prev.risks.filter((_, i) => i !== index) }))
+  }
+
+  // Generated review editing helpers
+  const addGeneratedField = () => {
+    const newField: FormField = {
+      fieldId: `field${Date.now()}`,
+      key: `field_${Date.now()}`,
+      label: "New Field",
+      type: "text",
+      placeholder: "",
+      required: true,
     }
-    setEditForm({ ...editForm, steps: [...editForm.steps, newStep] })
+    setGeneratedFields((prev) => [...prev, newField])
   }
 
-  const updateStep = (index: number, updates: Partial<WorkflowStep>) => {
-    const newSteps = [...editForm.steps]
-    newSteps[index] = { ...newSteps[index], ...updates }
-    setEditForm({ ...editForm, steps: newSteps })
+  const updateGeneratedField = (index: number, updates: Partial<FormField>) => {
+    setGeneratedFields((prev) => {
+      const newFields = [...prev]
+      newFields[index] = { ...newFields[index], ...updates }
+      if (updates.label) {
+        const normalized = updates.label
+          .trim()
+          .replace(/[^a-zA-Z0-9 ]/g, "")
+          .split(/\s+/)
+          .filter(Boolean)
+        const fieldId = normalized
+          .map((word, i) => (i === 0 ? word.toLowerCase() : word[0]?.toUpperCase() + word.slice(1).toLowerCase()))
+          .join("")
+        newFields[index].fieldId = fieldId || newFields[index].fieldId
+        newFields[index].key = updates.label.toLowerCase().replace(/\s+/g, "_")
+      }
+      return newFields
+    })
   }
 
-  const removeStep = (index: number) => {
-    setEditForm({ ...editForm, steps: editForm.steps.filter((_, i) => i !== index) })
+  const removeGeneratedField = (index: number) => {
+    setGeneratedFields((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const moveStep = (index: number, direction: "up" | "down") => {
-    const newSteps = [...editForm.steps]
-    const newIndex = direction === "up" ? index - 1 : index + 1
-    if (newIndex < 0 || newIndex >= newSteps.length) return
-    ;[newSteps[index], newSteps[newIndex]] = [newSteps[newIndex], newSteps[index]]
-    setEditForm({ ...editForm, steps: newSteps })
+  const addGeneratedRisk = () => {
+    setGeneratedRisks((prev) => [
+      ...prev,
+      {
+        riskId: `RISK-${Date.now()}`,
+        riskDefinition: "Describe how this risk is calculated",
+        thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+        description: "",
+      },
+    ])
+  }
+
+  const updateGeneratedRisk = (index: number, updates: Partial<RiskDefinition>) => {
+    setGeneratedRisks((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], ...updates }
+      return next
+    })
+  }
+
+  const updateGeneratedRiskThreshold = (
+    index: number,
+    key: "low" | "medium" | "high",
+    value: number
+  ) => {
+    setGeneratedRisks((prev) => {
+      const next = [...prev]
+      next[index] = {
+        ...next[index],
+        thresholds: {
+          ...next[index].thresholds,
+          [key]: value,
+        },
+      }
+      return next
+    })
+  }
+
+  const removeGeneratedRisk = (index: number) => {
+    setGeneratedRisks((prev) => prev.filter((_, i) => i !== index))
   }
 
   return (
@@ -339,7 +644,50 @@ export default function AdminPage() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                 />
-                <Button onClick={handleGenerate} disabled={isGenerating || !input.trim()} className="w-full sm:w-auto">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={handleUseSamplePrompt}>
+                    Use sample prompt
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Not sure what to type? Use a starter prompt and edit it.
+                  </p>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <Label htmlFor="reference-file">Reference file (optional)</Label>
+                  <Input
+                    id="reference-file"
+                    type="file"
+                    accept=".txt,.md,.json,.csv,.pdf"
+                    onChange={(e) => handleReferenceUpload(e.target.files?.[0] || null)}
+                  />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      {isReadingReference
+                        ? "Reading file..."
+                        : referenceName
+                          ? `Attached: ${referenceName}`
+                          : "Attach a policy, checklist, or template to guide the LLM"}
+                    </span>
+                    {referenceName && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleReferenceUpload(null)}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  onClick={handleGenerate}
+                  disabled={isGenerating || isReadingReference || !input.trim()}
+                  className="w-full sm:w-auto"
+                >
                   {isGenerating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -391,50 +739,223 @@ export default function AdminPage() {
 
                     <div className="grid gap-6 md:grid-cols-2">
                       {/* Fields */}
-                      <div>
-                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                          Form Fields
-                          <Badge variant="secondary" className="text-xs">
-                            {generatedProcess.fields.length}
-                          </Badge>
-                        </h4>
-                        <div className="space-y-2">
-                          {generatedProcess.fields.map((field) => (
-                            <div key={field.key} className="flex items-center justify-between p-3 rounded-lg bg-input">
-                              <span className="text-sm font-medium">{field.label}</span>
-                              <Badge variant="outline" className="text-xs capitalize">
-                                {field.type}
-                              </Badge>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-semibold flex items-center gap-2">
+                            Form Fields
+                            <Badge variant="secondary" className="text-xs">
+                              {generatedFields.length}
+                            </Badge>
+                          </h4>
+                          <Button variant="outline" size="sm" onClick={addGeneratedField}>
+                            <Plus className="mr-2 h-3 w-3" />
+                            Add Field
+                          </Button>
+                        </div>
+                        <div className="space-y-3">
+                          {generatedFields.map((field, index) => (
+                            <div key={field.fieldId || field.key} className="p-3 rounded-lg border border-border bg-input/60">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs text-muted-foreground">Field {index + 1}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() => removeGeneratedField(index)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <div className="grid gap-2">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Label</Label>
+                                  <Input
+                                    value={field.label}
+                                    onChange={(e) => updateGeneratedField(index, { label: e.target.value })}
+                                    className="h-8 text-sm"
+                                  />
+                                </div>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Type</Label>
+                                    <Select
+                                      value={field.type}
+                                      onValueChange={(value) =>
+                                        updateGeneratedField(index, { type: value as FormField["type"] })
+                                      }
+                                    >
+                                      <SelectTrigger className="h-8 text-sm">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {FIELD_TYPES.map((type) => (
+                                          <SelectItem key={type} value={type} className="capitalize">
+                                            {type}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Required</Label>
+                                    <Select
+                                      value={field.required ? "yes" : "no"}
+                                      onValueChange={(value) => updateGeneratedField(index, { required: value === "yes" })}
+                                    >
+                                      <SelectTrigger className="h-8 text-sm">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="yes">Yes</SelectItem>
+                                        <SelectItem value="no">No</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Placeholder</Label>
+                                  <Input
+                                    value={field.placeholder || ""}
+                                    onChange={(e) => updateGeneratedField(index, { placeholder: e.target.value })}
+                                    className="h-8 text-sm"
+                                  />
+                                </div>
+                                {field.type === "select" && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Options (comma-separated)</Label>
+                                    <Input
+                                      value={field.options?.join(", ") || ""}
+                                      onChange={(e) =>
+                                        updateGeneratedField(index, {
+                                          options: e.target.value
+                                            .split(",")
+                                            .map((s) => s.trim())
+                                            .filter(Boolean),
+                                        })
+                                      }
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                )}
+                                {field.type === "array" && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Item Type</Label>
+                                    <Select
+                                      value={field.itemType || "text"}
+                                      onValueChange={(value) =>
+                                        updateGeneratedField(index, { itemType: value as FormField["itemType"] })
+                                      }
+                                    >
+                                      <SelectTrigger className="h-8 text-sm">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {FIELD_TYPES.filter((type) => type !== "array" && type !== "textarea").map((type) => (
+                                          <SelectItem key={type} value={type} className="capitalize">
+                                            {type}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ))}
+                          {generatedFields.length === 0 && (
+                            <p className="text-xs text-muted-foreground">No fields generated. Add one to continue.</p>
+                          )}
                         </div>
                       </div>
 
-                      {/* Steps */}
-                      <div>
-                        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                          Workflow Steps
-                          <Badge variant="secondary" className="text-xs">
-                            {generatedProcess.steps.length}
-                          </Badge>
-                        </h4>
-                        <div className="space-y-2">
-                          {generatedProcess.steps.map((step, index) => (
-                            <div key={index} className="flex items-center gap-3 p-3 rounded-lg bg-input">
-                              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-medium shrink-0">
-                                {index + 1}
+                      {/* Risk Definitions */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-semibold flex items-center gap-2">
+                            Risk Definitions
+                            <Badge variant="secondary" className="text-xs">
+                              {generatedRisks.length}
+                            </Badge>
+                          </h4>
+                          <Button variant="outline" size="sm" onClick={addGeneratedRisk}>
+                            <Plus className="mr-2 h-3 w-3" />
+                            Add Risk
+                          </Button>
+                        </div>
+                        <div className="space-y-3">
+                          {generatedRisks.map((risk, index) => (
+                            <div key={risk.riskId} className="p-3 rounded-lg border border-border bg-input/60">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs text-muted-foreground">Risk {index + 1}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() => removeGeneratedRisk(index)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium">{step.name}</span>
-                                {step.action && (
-                                  <p className="text-xs text-muted-foreground truncate">→ {step.action}</p>
-                                )}
-                                {step.condition && (
-                                  <p className="text-xs text-warning truncate">if {step.condition}</p>
-                                )}
+                              <div className="space-y-2">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Risk ID</Label>
+                                  <Input
+                                    value={risk.riskId}
+                                    onChange={(e) => updateGeneratedRisk(index, { riskId: e.target.value })}
+                                    className="h-8 text-sm"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Risk Definition</Label>
+                                  <Textarea
+                                    value={risk.riskDefinition}
+                                    onChange={(e) => updateGeneratedRisk(index, { riskDefinition: e.target.value })}
+                                    className="min-h-[70px] text-sm"
+                                  />
+                                </div>
+                                <div className="grid gap-2 sm:grid-cols-3">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Low</Label>
+                                    <Input
+                                      type="number"
+                                      value={risk.thresholds.low}
+                                      onChange={(e) => updateGeneratedRiskThreshold(index, "low", Number(e.target.value))}
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Medium</Label>
+                                    <Input
+                                      type="number"
+                                      value={risk.thresholds.medium}
+                                      onChange={(e) => updateGeneratedRiskThreshold(index, "medium", Number(e.target.value))}
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">High</Label>
+                                    <Input
+                                      type="number"
+                                      value={risk.thresholds.high}
+                                      onChange={(e) => updateGeneratedRiskThreshold(index, "high", Number(e.target.value))}
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Description</Label>
+                                  <Input
+                                    value={risk.description || ""}
+                                    onChange={(e) => updateGeneratedRisk(index, { description: e.target.value })}
+                                    className="h-8 text-sm"
+                                  />
+                                </div>
                               </div>
                             </div>
                           ))}
+                          {generatedRisks.length === 0 && (
+                            <p className="text-xs text-muted-foreground">No risk definitions generated. Add one to continue.</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -505,7 +1026,7 @@ export default function AdminPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {processes.map((process) => (
-                  <Card key={process.id} className="border-border bg-card hover:border-primary/50 transition-colors">
+                  <Card key={getProcessKey(process)} className="border-border bg-card hover:border-primary/50 transition-colors">
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
@@ -519,10 +1040,10 @@ export default function AdminPage() {
                     <CardContent className="pt-0">
                       <div className="flex items-center gap-2 mb-4">
                         <Badge variant="secondary" className="text-xs">
-                          {process.fields.length} fields
+                          {getProcessFields(process).length} fields
                         </Badge>
                         <Badge variant="secondary" className="text-xs">
-                          {process.steps.length} steps
+                          {getProcessRisks(process).length} risks
                         </Badge>
                       </div>
                       <div className="flex items-center gap-2">
@@ -569,12 +1090,12 @@ export default function AdminPage() {
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
                   Form Fields
                   <Badge variant="secondary" className="text-xs">
-                    {viewingProcess.fields.length}
+                    {getProcessFields(viewingProcess).length}
                   </Badge>
                 </h4>
                 <div className="space-y-2">
-                  {viewingProcess.fields.map((field) => (
-                    <div key={field.key} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                  {getProcessFields(viewingProcess).map((field) => (
+                    <div key={field.fieldId || field.key} className="flex items-center justify-between p-2 rounded bg-secondary/50">
                       <div>
                         <span className="text-sm font-medium">{field.label}</span>
                         {field.placeholder && <p className="text-xs text-muted-foreground">{field.placeholder}</p>}
@@ -591,22 +1112,23 @@ export default function AdminPage() {
 
               <div>
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                  Workflow Steps
+                  Risk Definitions
                   <Badge variant="secondary" className="text-xs">
-                    {viewingProcess.steps.length}
+                    {getProcessRisks(viewingProcess).length}
                   </Badge>
                 </h4>
                 <div className="space-y-2">
-                  {viewingProcess.steps.map((step, index) => (
-                    <div key={index} className="flex items-center gap-3 p-2 rounded bg-secondary/50">
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-medium">
-                        {index + 1}
+                  {getProcessRisks(viewingProcess).map((risk, index) => (
+                    <div key={risk.riskId} className="p-3 rounded bg-secondary/50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">{risk.riskId}</span>
+                        <span className="text-xs text-muted-foreground">Risk {index + 1}</span>
                       </div>
-                      <div className="flex-1">
-                        <span className="text-sm font-medium">{step.name}</span>
-                        {step.action && <span className="text-xs text-muted-foreground ml-2">→ {step.action}</span>}
-                        {step.condition && <span className="text-xs text-warning ml-2">if {step.condition}</span>}
+                      <p className="text-xs text-muted-foreground mt-1">{risk.riskDefinition}</p>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        Thresholds: low {risk.thresholds.low}, medium {risk.thresholds.medium}, high {risk.thresholds.high}
                       </div>
+                      {risk.description && <p className="text-xs text-muted-foreground mt-1">{risk.description}</p>}
                     </div>
                   ))}
                 </div>
@@ -768,87 +1290,92 @@ export default function AdminPage() {
 
             <Separator />
 
-            {/* Steps Section */}
+            {/* Risk Definitions Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Workflow Steps</Label>
-                <Button variant="outline" size="sm" onClick={addStep}>
+                <Label className="text-base font-semibold">Risk Definitions</Label>
+                <Button variant="outline" size="sm" onClick={addEditRisk}>
                   <Plus className="mr-2 h-3 w-3" />
-                  Add Step
+                  Add Risk
                 </Button>
               </div>
               <div className="space-y-3">
-                {editForm.steps.map((step, index) => (
-                  <div key={index} className="p-3 rounded-lg border border-border bg-secondary/30">
+                {editForm.risks.map((risk, index) => (
+                  <div key={risk.riskId} className="p-3 rounded-lg border border-border bg-secondary/30">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-medium">
                         {index + 1}
                       </div>
-                      <span className="text-sm font-medium flex-1">Step {index + 1}</span>
-                      <Button variant="ghost" size="icon-sm" onClick={() => moveStep(index, "up")} disabled={index === 0}>
-                        <ChevronUp className="h-3 w-3" />
-                      </Button>
+                      <span className="text-sm font-medium flex-1">Risk {index + 1}</span>
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => moveStep(index, "down")}
-                        disabled={index === editForm.steps.length - 1}
-                      >
-                        <ChevronDown className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => removeStep(index)}
+                        onClick={() => removeEditRisk(index)}
                         className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">Step Name</Label>
+                        <Label className="text-xs">Risk ID</Label>
                         <Input
-                          value={step.name}
-                          onChange={(e) => updateStep(index, { name: e.target.value })}
-                          placeholder="Step name"
+                          value={risk.riskId}
+                          onChange={(e) => updateEditRisk(index, { riskId: e.target.value })}
                           className="h-8 text-sm"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Action (optional)</Label>
-                        <Select
-                          value={step.action || ""}
-                          onValueChange={(value) => updateStep(index, { action: value || undefined })}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select action" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">None</SelectItem>
-                            {ACTION_TYPES.map((action) => (
-                              <SelectItem key={action} value={action}>
-                                {action.replace(/_/g, " ")}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-xs">Risk Definition</Label>
+                        <Textarea
+                          value={risk.riskDefinition}
+                          onChange={(e) => updateEditRisk(index, { riskDefinition: e.target.value })}
+                          className="min-h-[70px] text-sm"
+                        />
                       </div>
-                      <div className="space-y-1 sm:col-span-2">
-                        <Label className="text-xs">Condition (optional)</Label>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Low</Label>
+                          <Input
+                            type="number"
+                            value={risk.thresholds.low}
+                            onChange={(e) => updateEditRiskThreshold(index, "low", Number(e.target.value))}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Medium</Label>
+                          <Input
+                            type="number"
+                            value={risk.thresholds.medium}
+                            onChange={(e) => updateEditRiskThreshold(index, "medium", Number(e.target.value))}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">High</Label>
+                          <Input
+                            type="number"
+                            value={risk.thresholds.high}
+                            onChange={(e) => updateEditRiskThreshold(index, "high", Number(e.target.value))}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Description</Label>
                         <Input
-                          value={step.condition || ""}
-                          onChange={(e) => updateStep(index, { condition: e.target.value || undefined })}
-                          placeholder="e.g., cost > 1000"
+                          value={risk.description || ""}
+                          onChange={(e) => updateEditRisk(index, { description: e.target.value })}
                           className="h-8 text-sm"
                         />
                       </div>
                     </div>
                   </div>
                 ))}
-                {editForm.steps.length === 0 && (
+                {editForm.risks.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    No steps added yet. Click &quot;Add Step&quot; to create workflow steps.
+                    No risk definitions added yet. Click &quot;Add Risk&quot; to create risk definitions.
                   </p>
                 )}
               </div>

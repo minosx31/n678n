@@ -1,5 +1,36 @@
 import { NextRequest, NextResponse } from "next/server"
 import type { Request, TimelineEvent } from "@/context/global-state"
+import { getSupabaseServerClient } from "@/lib/supabase/server"
+
+async function insertRequestToSupabase(request: Request) {
+  try {
+    const supabase = getSupabaseServerClient()
+    const { data, error } = await supabase
+      .from("requests")
+      .insert({
+        request_code: request.id,
+        process_id: request.processId,
+        process_name: request.processName,
+        submitted_by: request.submittedBy,
+        status: request.status,
+        submitted_at: request.submittedAt,
+        remarks: request.remarks || null,
+        decided_by: request.decidedBy || null,
+        decided_at: request.decidedAt || null,
+        data: request.data,
+        timeline: request.timeline,
+      })
+      .select()
+
+    if (error) {
+      return { ok: false, error: error.message }
+    }
+
+    return { ok: true, data }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" }
+  }
+}
 
 // In-memory store (replace with database in production)
 const requestsStore: Request[] = []
@@ -86,6 +117,11 @@ export async function POST(request: NextRequest) {
     }
 
     requestsStore.push(newRequest)
+
+    const supabaseResult = await insertRequestToSupabase(newRequest)
+    if (!supabaseResult.ok) {
+      console.error("Supabase insert failed:", supabaseResult.error)
+    }
 
     return NextResponse.json({ request: newRequest }, { status: 201 })
   } catch (error) {

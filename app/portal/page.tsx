@@ -54,6 +54,9 @@ export default function PortalPage() {
     return null
   }
 
+  const getProcessKey = (process: Process) => process.processId || process.id || process.name
+  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
+
   const myRequests = requests.filter((r) => r.submittedBy === currentUser.name)
 
   const handleSubmit = () => {
@@ -62,7 +65,7 @@ export default function PortalPage() {
     const now = new Date().toISOString()
     const newRequest: Request = {
       id: `req-${Date.now()}`,
-      processId: selectedProcess.id,
+      processId: selectedProcess.processId || selectedProcess.id || selectedProcess.name,
       processName: selectedProcess.name,
       submittedBy: currentUser.name,
       submittedAt: now,
@@ -182,14 +185,14 @@ export default function PortalPage() {
                 <CardContent className="space-y-3">
                   {processes.map((process) => (
                     <button
-                      key={process.id}
+                      key={getProcessKey(process)}
                       onClick={() => {
                         setSelectedProcess(process)
                         setFormData({})
                         setSubmitted(false)
                       }}
                       className={`w-full flex items-center justify-between p-4 rounded-lg border transition-colors text-left cursor-pointer ${
-                        selectedProcess?.id === process.id
+                        (selectedProcess ? getProcessKey(selectedProcess) : "") === getProcessKey(process)
                           ? "border-primary bg-primary/5"
                           : "border-border bg-secondary/50 hover:bg-secondary"
                       }`}
@@ -236,21 +239,25 @@ export default function PortalPage() {
                         }}
                         className="space-y-4"
                       >
-                        {selectedProcess.fields.map((field) => (
-                          <div key={field.key} className="space-y-2">
-                            <Label htmlFor={field.key}>{field.label}</Label>
+                        {getProcessFields(selectedProcess).map((field) => (
+                          <div key={field.fieldId || field.key} className="space-y-2">
+                            <Label htmlFor={field.fieldId || field.key}>{field.label}</Label>
                             {field.type === "textarea" ? (
                               <Textarea
-                                id={field.key}
+                                id={field.fieldId || field.key}
                                 placeholder={field.placeholder}
-                                value={formData[field.key] || ""}
-                                onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+                                value={formData[field.fieldId || field.key || ""] || ""}
+                                onChange={(e) =>
+                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: e.target.value })
+                                }
                                 className="bg-input"
                               />
                             ) : field.type === "select" && field.options ? (
                               <Select
-                                value={formData[field.key] || ""}
-                                onValueChange={(value) => setFormData({ ...formData, [field.key]: value })}
+                                value={formData[field.fieldId || field.key || ""] || ""}
+                                onValueChange={(value) =>
+                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: value })
+                                }
                               >
                                 <SelectTrigger className="bg-input">
                                   <SelectValue placeholder={`Select ${field.label}`} />
@@ -265,11 +272,13 @@ export default function PortalPage() {
                               </Select>
                             ) : (
                               <Input
-                                id={field.key}
+                                id={field.fieldId || field.key}
                                 type={field.type}
                                 placeholder={field.placeholder}
-                                value={formData[field.key] || ""}
-                                onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+                                value={formData[field.fieldId || field.key || ""] || ""}
+                                onChange={(e) =>
+                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: e.target.value })
+                                }
                                 className="bg-input"
                               />
                             )}

@@ -10,11 +10,19 @@ export interface User {
 }
 
 export interface FormField {
-  key: string
+  fieldId: string
+  key?: string
   label: string
-  type: "text" | "number" | "textarea" | "select"
+  type: "text" | "number" | "textarea" | "select" | "email" | "array"
+  required?: boolean
   placeholder?: string
   options?: string[]
+  itemType?: "text" | "number" | "email" | "select"
+  validation?: {
+    maxLength?: number
+    min?: number
+    max?: number
+  }
 }
 
 export interface WorkflowStep {
@@ -23,12 +31,50 @@ export interface WorkflowStep {
   condition?: string
 }
 
+export interface FormDefinition {
+  title: string
+  description?: string
+  fields: FormField[]
+}
+
+export interface PolicyDefinition {
+  policyId: string
+  policyText: string
+  type: "business-rule"
+  severity: "high" | "medium" | "low"
+}
+
+export interface RiskDefinition {
+  riskId: string
+  riskDefinition: string
+  thresholds: {
+    low: number
+    medium: number
+    high: number
+  }
+  description?: string
+}
+
+export interface AgentConfig {
+  allowHumanOverride: boolean
+  defaultDecision: "H" | "A" | "R"
+  confidenceThreshold: number
+}
+
 export interface Process {
-  id: string
+  processId: string
+  createdAt: string
   name: string
   description: string
-  fields: FormField[]
-  steps: WorkflowStep[]
+  version: string
+  formDefinition: FormDefinition
+  policies: PolicyDefinition[]
+  riskDefinitions: RiskDefinition[]
+  agentConfig: AgentConfig
+  // Legacy compatibility
+  id?: string
+  fields?: FormField[]
+  steps?: WorkflowStep[]
 }
 
 export interface TimelineEvent {
@@ -71,13 +117,69 @@ const GlobalStateContext = createContext<GlobalState | undefined>(undefined)
 
 const initialProcesses: Process[] = [
   {
-    id: "laptop-request",
+    processId: "laptop-request",
+    createdAt: "2026-01-10T09:00:00Z",
     name: "Laptop Request",
     description: "Request a new laptop or laptop upgrade for your work needs.",
-    fields: [
-      { key: "laptop_type", label: "Laptop Type", type: "select", options: ["MacBook Pro", "Dell XPS", "ThinkPad X1"] },
-      { key: "specs", label: "Required Specifications", type: "text", placeholder: "e.g., 16GB RAM, 512GB SSD" },
+    version: "v1.0",
+    formDefinition: {
+      title: "Laptop Request",
+      description: "Provide details for your laptop request.",
+      fields: [
+        {
+          fieldId: "laptopType",
+          key: "laptop_type",
+          label: "Laptop Type",
+          type: "select",
+          options: ["MacBook Pro", "Dell XPS", "ThinkPad X1"],
+          required: true,
+        },
+        {
+          fieldId: "specs",
+          key: "specs",
+          label: "Required Specifications",
+          type: "text",
+          placeholder: "e.g., 16GB RAM, 512GB SSD",
+          required: true,
+        },
+        {
+          fieldId: "justification",
+          key: "justification",
+          label: "Business Justification",
+          type: "textarea",
+          placeholder: "Explain why you need this laptop...",
+          required: true,
+        },
+      ],
+    },
+    policies: [
       {
+        policyId: "POLICY-BUDGET-001",
+        policyText: "Requests over $1500 require manager approval.",
+        type: "business-rule",
+        severity: "high",
+      },
+    ],
+    riskDefinitions: [
+      {
+        riskId: "RISK-COST-001",
+        riskDefinition: "Risk increases when cost exceeds budget thresholds.",
+        thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+        description: "Cost-based risk assessment for hardware requests.",
+      },
+    ],
+    agentConfig: {
+      allowHumanOverride: true,
+      defaultDecision: "H",
+      confidenceThreshold: 0.9,
+    },
+    // Legacy compatibility
+    id: "laptop-request",
+    fields: [
+      { fieldId: "laptopType", key: "laptop_type", label: "Laptop Type", type: "select", options: ["MacBook Pro", "Dell XPS", "ThinkPad X1"] },
+      { fieldId: "specs", key: "specs", label: "Required Specifications", type: "text", placeholder: "e.g., 16GB RAM, 512GB SSD" },
+      {
+        fieldId: "justification",
         key: "justification",
         label: "Business Justification",
         type: "textarea",
@@ -188,11 +290,14 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
   }
 
   const updateProcess = (process: Process) => {
-    setProcesses((prev) => prev.map((p) => (p.id === process.id ? process : p)))
+    const targetId = process.processId || process.id
+    setProcesses((prev) =>
+      prev.map((p) => (p.processId === targetId || p.id === targetId ? process : p))
+    )
   }
 
   const deleteProcess = (id: string) => {
-    setProcesses((prev) => prev.filter((p) => p.id !== id))
+    setProcesses((prev) => prev.filter((p) => p.processId !== id && p.id !== id))
   }
 
   const addRequest = (request: Request) => {

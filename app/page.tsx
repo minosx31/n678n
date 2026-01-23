@@ -57,7 +57,7 @@ export default function LandingPage() {
                 <Shield className="h-5 w-5 text-primary" />
               </div>
               <div className="text-left">
-                <div className="font-semibold">Login as IT Admin</div>
+                <div className="font-semibold">Login as Admin</div>
                 <div className="text-xs text-muted-foreground">Build and manage approval processes</div>
               </div>
             </Link>
@@ -71,7 +71,7 @@ export default function LandingPage() {
                 <User className="h-5 w-5 text-accent" />
               </div>
               <div className="text-left">
-                <div className="font-semibold">Login as Employee</div>
+                <div className="font-semibold">Login as Requester</div>
                 <div className="text-xs text-muted-foreground">Submit and track your requests</div>
               </div>
             </Link>
@@ -85,7 +85,7 @@ export default function LandingPage() {
                 <UserCheck className="h-5 w-5 text-warning" />
               </div>
               <div className="text-left">
-                <div className="font-semibold">Login as Manager</div>
+                <div className="font-semibold">Login as Approver</div>
                 <div className="text-xs text-muted-foreground">Review and approve pending requests</div>
               </div>
             </Link>
