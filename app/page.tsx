@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useGlobalState } from "@/context/global-state"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Shield, User, UserCheck, Workflow } from "lucide-react"
@@ -13,9 +13,35 @@ const roleConfig = {
   approver: { name: "Mike Manager", route: "/approvals" },
 }
 
+type UserRecord = {
+  id: string
+  name: string
+  role: keyof typeof roleConfig
+}
+
 export default function LandingPage() {
   const router = useRouter()
   const { currentUser, setCurrentUser } = useGlobalState()
+  const [users, setUsers] = useState<UserRecord[]>([])
+
+  const usersByRole = useMemo(() => {
+    return users.reduce(
+      (acc, user) => {
+        acc[user.role] = acc[user.role] ? [...acc[user.role], user] : [user]
+        return acc
+      },
+      {} as Record<keyof typeof roleConfig, UserRecord[]>
+    )
+  }, [users])
+
+  const getRoleUser = (role: keyof typeof roleConfig) => {
+    const roleUsers = usersByRole[role]
+    return roleUsers && roleUsers.length > 0 ? roleUsers[0] : null
+  }
+
+  const getRoleName = (role: keyof typeof roleConfig) => {
+    return getRoleUser(role)?.name ?? roleConfig[role].name
+  }
 
   useEffect(() => {
     if (currentUser?.role) {
@@ -23,8 +49,23 @@ export default function LandingPage() {
     }
   }, [currentUser, router])
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        const response = await fetch("/api/users")
+        if (!response.ok) {
+          return
+        }
+        const data = await response.json()
+        setUsers(data.users || [])
+      })()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
   const handleSetUser = (role: "admin" | "employee" | "approver") => {
-    setCurrentUser({ name: roleConfig[role].name, role })
+    setCurrentUser({ name: getRoleName(role), role })
   }
 
   if (currentUser) {
@@ -59,6 +100,7 @@ export default function LandingPage() {
               <div className="text-left">
                 <div className="font-semibold">Login as Admin</div>
                 <div className="text-xs text-muted-foreground">Build and manage approval processes</div>
+                <div className="text-xs text-muted-foreground">{getRoleName("admin")}</div>
               </div>
             </Link>
 
@@ -73,6 +115,7 @@ export default function LandingPage() {
               <div className="text-left">
                 <div className="font-semibold">Login as Requester</div>
                 <div className="text-xs text-muted-foreground">Submit and track your requests</div>
+                <div className="text-xs text-muted-foreground">{getRoleName("employee")}</div>
               </div>
             </Link>
 
@@ -87,6 +130,7 @@ export default function LandingPage() {
               <div className="text-left">
                 <div className="font-semibold">Login as Approver</div>
                 <div className="text-xs text-muted-foreground">Review and approve pending requests</div>
+                <div className="text-xs text-muted-foreground">{getRoleName("approver")}</div>
               </div>
             </Link>
           </CardContent>
