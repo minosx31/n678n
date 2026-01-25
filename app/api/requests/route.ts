@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import type { Request, TimelineEvent } from "@/context/global-state"
+import type { Request } from "@/context/global-state"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 
 async function insertRequestToSupabase(request: Request) {
@@ -18,7 +18,6 @@ async function insertRequestToSupabase(request: Request) {
         decided_by: request.decidedBy || null,
         decided_at: request.decidedAt || null,
         data: request.data,
-        timeline: request.timeline,
       })
       .select()
 
@@ -32,33 +31,88 @@ async function insertRequestToSupabase(request: Request) {
   }
 }
 
-// In-memory store (replace with database in production)
-const requestsStore: Request[] = []
-
 // GET - Fetch all requests with optional filters
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams
-  const status = searchParams.get("status")
-  const submittedBy = searchParams.get("submittedBy")
-  const processId = searchParams.get("processId")
+  try {
+    const supabase = getSupabaseServerClient()
+    const searchParams = request.nextUrl.searchParams
+    const status = searchParams.get("status")
+    const submittedBy = searchParams.get("submittedBy")
+    const processId = searchParams.get("processId")
 
-  let filteredRequests = [...requestsStore]
+    let submittedById: string | null = null
+    if (submittedBy) {
+      const { data: userRows, error: userError } = await supabase
+        .from("users")
+        .select("id")
+        .eq("name", submittedBy)
+        .limit(1)
 
-  if (status) {
-    filteredRequests = filteredRequests.filter(r => r.status === status)
-  }
-  if (submittedBy) {
-    filteredRequests = filteredRequests.filter(r => r.submittedBy === submittedBy)
-  }
-  if (processId) {
-    filteredRequests = filteredRequests.filter(r => r.processId === processId)
-  }
+      if (userError) {
+        return NextResponse.json({ error: userError.message }, { status: 500 })
+      }
 
-  return NextResponse.json({ 
-    requests: filteredRequests,
-    total: filteredRequests.length,
-    filters: { status, submittedBy, processId }
-  })
+      submittedById = userRows?.[0]?.id ?? null
+      if (!submittedById) {
+        return NextResponse.json({ requests: [], total: 0, filters: { status, submittedBy, processId } })
+      }
+    }
+
+    let query = supabase.from("requests").select("*")
+
+    if (status) {
+      query = query.eq("status", status)
+    }
+    if (submittedById) {
+      query = query.eq("submitted_by", submittedById)
+    }
+    if (processId) {
+      query = query.eq("process_id", processId)
+    }
+
+    const { data, error } = await query.order("submitted_at", { ascending: false })
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    type RequestRow = { submitted_by?: string } & Record<string, unknown>
+
+    const requestRows = (data || []) as RequestRow[]
+    const submittedIds = Array.from(
+      new Set(requestRows.map((row) => row.submitted_by).filter((id): id is string => Boolean(id)))
+    )
+
+    let userNameById = new Map<string, string>()
+    if (submittedIds.length > 0) {
+      const { data: usersData, error: usersError } = await supabase
+        .from("users")
+        .select("id,name")
+        .in("id", submittedIds)
+
+      if (usersError) {
+        return NextResponse.json({ error: usersError.message }, { status: 500 })
+      }
+
+      userNameById = new Map((usersData || []).map((user) => [user.id, user.name]))
+    }
+
+    const requests = requestRows.map((row) => ({
+      ...row,
+      submittedBy: row.submitted_by ? userNameById.get(row.submitted_by) || row.submitted_by : row.submitted_by,
+    }))
+
+    return NextResponse.json({
+      requests,
+      total: requests.length,
+      filters: { status, submittedBy, processId },
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to fetch requests" },
+      { status: 500 }
+    )
+  }
 }
 
 // POST - Create a new request
@@ -74,53 +128,66 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const now = new Date().toISOString()
-    
-    // Create initial timeline events
-    const timeline: TimelineEvent[] = [
-      {
-        id: `evt-${Date.now()}`,
-        timestamp: now,
-        type: "submitted",
-        title: "Request Submitted",
-        description: "Request was submitted for processing",
-        actor: body.submittedBy,
-        status: "completed",
-      },
-      {
-        id: `evt-${Date.now() + 1}`,
-        timestamp: new Date(Date.now() + 2000).toISOString(),
-        type: "auto_check",
-        title: "Automated Checks",
-        description: "Running automated validation and risk assessment",
-        status: "completed",
-      },
-      {
-        id: `evt-${Date.now() + 2}`,
-        timestamp: new Date(Date.now() + 5000).toISOString(),
-        type: "pending_approval",
-        title: "Pending Approval",
-        description: "Waiting for manager review",
-        status: "current",
-      },
-    ]
+    const supabase = getSupabaseServerClient()
+    const { data: userRows, error: userError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("name", body.submittedBy)
+      .limit(1)
 
-    const newRequest: Request = {
-      id: `req-${Date.now()}`,
-      processId: body.processId,
-      processName: body.processName,
-      submittedBy: body.submittedBy,
-      submittedAt: now,
-      status: "Pending",
-      data: body.data,
-      timeline,
+    if (userError) {
+      return NextResponse.json({ error: userError.message }, { status: 500 })
     }
 
-    requestsStore.push(newRequest)
+    const submittedById = userRows?.[0]?.id
+    if (!submittedById) {
+      return NextResponse.json({ error: "Submitted user not found" }, { status: 400 })
+    }
+
+    const now = new Date()
+    const submittedAt = now.toISOString()
+    const formatRequestId = (date: Date) => {
+      const datePart = date.toISOString().slice(0, 10).replace(/-/g, "")
+      const timePart = date.toTimeString().slice(0, 8).replace(/:/g, "")
+      return `req-${datePart}-${timePart}`
+    }
+
+    const newRequest: Request = {
+      id: formatRequestId(now),
+      processId: body.processId,
+      processName: body.processName,
+      submittedBy: submittedById,
+      submittedAt,
+      status: "Pending",
+      data: body.data,
+    }
 
     const supabaseResult = await insertRequestToSupabase(newRequest)
     if (!supabaseResult.ok) {
       console.error("Supabase insert failed:", supabaseResult.error)
+      return NextResponse.json(
+        { error: supabaseResult.error || "Failed to create request" },
+        { status: 500 }
+      )
+    }
+
+    const workflowEndpoint = process.env.WORKFLOW_ENDPOINT_URL
+    if (workflowEndpoint) {
+      try {
+        const approvalCallbackUrl = new URL("/api/approval-decision", request.nextUrl.origin).toString()
+        await fetch(workflowEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_code: newRequest.id,
+            process_id: newRequest.processId,
+            data: newRequest.data,
+            approval_callback_url: approvalCallbackUrl,
+          }),
+        })
+      } catch (error) {
+        console.error("Failed to notify workflow endpoint:", error)
+      }
     }
 
     return NextResponse.json({ request: newRequest }, { status: 201 })

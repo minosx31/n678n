@@ -28,7 +28,7 @@ Structure your response exactly as follows (strictly JSON, no markdown):
       {
         "fieldId": "field_key_camelCase",
         "label": "Human Readable Label",
-        "type": "text" | "number" | "array" | "email" | "select",
+        "type": "text" | "number" | "array" | "email" | "select" | "file",
         "required": true,
         "placeholder": "Example input...",
         "validation": { "maxLength": 100, "min": 0, "max": 1000000 }
