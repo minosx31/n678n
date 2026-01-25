@@ -92,7 +92,7 @@ export default function LandingPage() {
             <Link
               href="/admin"
               onClick={() => handleSetUser("admin")}
-              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-primary/10 hover:border-primary bg-transparent transition-colors"
+              className="w-full flex items-center justify-start gap-4 p-2 rounded-md border border-input hover:bg-primary/10 hover:border-primary bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                 <Shield className="h-5 w-5 text-primary" />
@@ -107,7 +107,7 @@ export default function LandingPage() {
             <Link
               href="/portal"
               onClick={() => handleSetUser("employee")}
-              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-success/10 hover:border-success bg-transparent transition-colors"
+              className="w-full flex items-center justify-start gap-4 p-2 rounded-md border border-input hover:bg-success/10 hover:border-success bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
                 <User className="h-5 w-5 text-accent" />
@@ -122,7 +122,7 @@ export default function LandingPage() {
             <Link
               href="/approvals"
               onClick={() => handleSetUser("approver")}
-              className="w-full h-14 flex items-center justify-start gap-4 px-4 rounded-md border border-input hover:bg-warning/10 hover:border-warning bg-transparent transition-colors"
+              className="w-full flex items-center justify-start gap-4 p-2 rounded-md border border-input hover:bg-warning/10 hover:border-warning bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
                 <UserCheck className="h-5 w-5 text-warning" />

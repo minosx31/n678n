@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useGlobalState, type Request } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -29,15 +30,13 @@ import {
   ThumbsDown,
   MessageSquare,
   Eye,
-  Bot,
   UserCheck,
-  Send,
-  AlertCircle,
 } from "lucide-react"
 
 export default function ApprovalsPage() {
   const router = useRouter()
-  const { currentUser, requests, updateRequestStatus } = useGlobalState()
+  const { currentUser } = useGlobalState()
+  const [requests, setRequests] = useState<Request[]>([])
   
   // Confirmation modal state
   const [confirmingRequest, setConfirmingRequest] = useState<Request | null>(null)
@@ -46,19 +45,68 @@ export default function ApprovalsPage() {
   
   // View request details
   const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
+  const [auditLogData, setAuditLogData] = useState<string | null>(null)
+  const [auditLogError, setAuditLogError] = useState<string | null>(null)
+  const [auditLogLoading, setAuditLogLoading] = useState(false)
+
+  const fetchRequests = useCallback(async () => {
+    const response = await fetch("/api/requests")
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    setRequests(data.requests || [])
+  }, [])
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "approver") {
       router.push("/")
+      return
     }
-  }, [currentUser, router])
+
+    const timeoutId = window.setTimeout(() => {
+      void fetchRequests()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [currentUser, router, fetchRequests])
+
+  useEffect(() => {
+    const auditUrl = viewingRequest?.auditLogUrl
+    if (!auditUrl) {
+      setAuditLogData(null)
+      setAuditLogError(null)
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        setAuditLogLoading(true)
+        setAuditLogError(null)
+        try {
+          const response = await fetch(auditUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to fetch audit log (${response.status})`)
+          }
+          const data = await response.json()
+          setAuditLogData(JSON.stringify(data, null, 2))
+        } catch (error) {
+          setAuditLogError(error instanceof Error ? error.message : "Failed to load audit log")
+        } finally {
+          setAuditLogLoading(false)
+        }
+      })()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [viewingRequest?.auditLogUrl])
 
   if (!currentUser || currentUser.role !== "approver") {
     return null
   }
 
   const pendingRequests = requests.filter((r) => r.status === "Pending")
-  const processedRequests = requests.filter((r) => r.status !== "Pending")
+  const humanRequests = requests.filter((r) => r.status === "Human")
 
   const handleApproveClick = (request: Request) => {
     setConfirmingRequest(request)
@@ -72,18 +120,26 @@ export default function ApprovalsPage() {
     setRemarks("")
   }
 
-  const handleConfirm = () => {
-    if (confirmingRequest && confirmAction) {
-      updateRequestStatus(
-        confirmingRequest.id,
-        confirmAction,
-        remarks.trim() || undefined,
-        currentUser.name
-      )
-      setConfirmingRequest(null)
-      setConfirmAction(null)
-      setRemarks("")
+  const handleConfirm = async () => {
+    if (!confirmingRequest || !confirmAction) return
+
+    const response = await fetch(`/api/requests/${confirmingRequest.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: confirmAction,
+        remarks: remarks.trim() || undefined,
+        decidedBy: currentUser.name,
+      }),
+    })
+
+    if (response.ok) {
+      await fetchRequests()
     }
+
+    setConfirmingRequest(null)
+    setConfirmAction(null)
+    setRemarks("")
   }
 
   const handleViewRequest = (request: Request) => {
@@ -98,31 +154,27 @@ export default function ApprovalsPage() {
         return <CheckCircle2 className="h-4 w-4 text-success" />
       case "Rejected":
         return <XCircle className="h-4 w-4 text-destructive" />
+      case "Human":
+        return <User className="h-4 w-4 text-primary" />
     }
   }
 
-  const getTimelineIcon = (type: string) => {
-    switch (type) {
-      case "submitted":
-        return <Send className="h-3 w-3" />
-      case "auto_check":
-        return <Bot className="h-3 w-3" />
-      case "pending_approval":
-        return <Clock className="h-3 w-3" />
-      case "approved":
-        return <CheckCircle2 className="h-3 w-3" />
-      case "rejected":
-        return <XCircle className="h-3 w-3" />
-      default:
-        return <AlertCircle className="h-3 w-3" />
-    }
-  }
+  const getDisplayStatus = (status: string) => (status === "Human" ? "Needs Review" : status)
 
-  const getTimelineColor = (status: string, type: string) => {
-    if (status === "current") return "bg-warning text-warning-foreground"
-    if (type === "approved") return "bg-success text-success-foreground"
-    if (type === "rejected") return "bg-destructive text-destructive-foreground"
-    return "bg-primary/20 text-primary"
+  const getStatusBadge = (status: string) => {
+    const displayStatus = getDisplayStatus(status)
+    const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+      Pending: "secondary",
+      Approved: "default",
+      Rejected: "destructive",
+      "Needs Review": "outline",
+    }
+
+    return (
+      <Badge variant={variants[displayStatus] || "secondary"} className="text-xs">
+        {displayStatus}
+      </Badge>
+    )
   }
 
   return (
@@ -130,7 +182,20 @@ export default function ApprovalsPage() {
       <AppHeader title="Approvals" />
 
       <main className="p-6 max-w-6xl mx-auto space-y-6">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card className="border-border bg-card">
+            <CardContent className="py-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{humanRequests.length}</p>
+                  <p className="text-sm text-muted-foreground">Human Review</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
           <Card className="">
             <CardContent className="py-3">
               <div className="flex items-center gap-3">
@@ -172,134 +237,252 @@ export default function ApprovalsPage() {
           </Card>
         </div>
 
-        <Card className="border-border bg-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-warning" />
-              Pending Approvals
-            </CardTitle>
-            <CardDescription>Review and take action on pending requests</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {pendingRequests.length > 0 ? (
-              <div className="space-y-4">
-                {pendingRequests.map((request) => (
-                  <div key={request.id} className="p-4 rounded-lg border border-border bg-secondary/50">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <FileText className="h-4 w-4 text-primary" />
-                          <h3 className="font-semibold">{request.processName}</h3>
+        <Tabs defaultValue="needs-review" className="space-y-4">
+          <TabsList className="bg-secondary">
+            <TabsTrigger value="needs-review">
+              Needs Review
+              {(humanRequests.length + pendingRequests.length) > 0 && (
+                <Badge variant="secondary" className="ml-2 text-xs">
+                  {humanRequests.length + pendingRequests.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="all-requests">All Requests</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="needs-review" className="space-y-6">
+            <Card className="border-border bg-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5 text-primary" />
+                  Human Decisions
+                </CardTitle>
+                <CardDescription>These requests require a manual decision.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {humanRequests.length > 0 ? (
+                  <div className="space-y-4">
+                    {humanRequests.map((request) => (
+                      <div key={request.id} className="p-4 rounded-lg border border-border bg-secondary/50">
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <FileText className="h-4 w-4 text-primary" />
+                              <h3 className="font-semibold">{request.processName}</h3>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {request.submittedBy}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {new Date(request.submittedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleViewRequest(request)}
+                              className="text-muted-foreground"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Badge variant="secondary" className="text-xs">
+                              {request.id}
+                            </Badge>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            {request.submittedBy}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(request.submittedAt).toLocaleDateString()}
-                          </span>
+
+                        <Separator className="my-3" />
+
+                        <div className="grid gap-2 mb-4">
+                          {Object.entries(request.data).map(([key, value]) => (
+                            <div key={key} className="flex justify-between text-sm">
+                              <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
+                              <span className="font-medium text-right max-w-[60%] truncate">
+                                {Array.isArray(value) ? value.join(", ") : value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="flex-1 hover:bg-primary/70"
+                            onClick={() => handleApproveClick(request)}
+                          >
+                            <ThumbsUp className="mr-2 h-4 w-4" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 border-destructive/50 text-primary-foreground hover:bg-destructive/70 bg-destructive"
+                            onClick={() => handleRejectClick(request)}
+                          >
+                            <ThumbsDown className="mr-2 h-4 w-4" />
+                            Reject
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewRequest(request)}
-                          className="text-muted-foreground"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Badge variant="secondary" className="text-xs">
-                          {request.id}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <Separator className="my-3" />
-
-                    <div className="grid gap-2 mb-4">
-                      {Object.entries(request.data).map(([key, value]) => (
-                        <div key={key} className="flex justify-between text-sm">
-                          <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
-                          <span className="font-medium text-right max-w-[60%] truncate">{value}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="flex-1 hover:bg-primary/70"
-                        onClick={() => handleApproveClick(request)}
-                      >
-                        <ThumbsUp className="mr-2 h-4 w-4" />
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 border-destructive/50 text-primary-foreground hover:bg-destructive/70 bg-destructive"
-                        onClick={() => handleRejectClick(request)}
-                      >
-                        <ThumbsDown className="mr-2 h-4 w-4" />
-                        Reject
-                      </Button>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="h-12 w-12 rounded-full bg-success/20 flex items-center justify-center mb-4">
-                  <CheckCircle2 className="h-6 w-6 text-success" />
-                </div>
-                <p className="font-medium">All caught up!</p>
-                <p className="text-sm text-muted-foreground mt-1">No pending requests to review</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {processedRequests.length > 0 && (
-          <Card className="border-border bg-card">
-            <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-              <CardDescription>Previously processed requests</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {processedRequests.map((request) => (
-                  <div
-                    key={request.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"
-                    onClick={() => handleViewRequest(request)}
-                  >
-                    <div className="flex items-center gap-3">
-                      {getStatusIcon(request.status)}
-                      <div>
-                        <p className="font-medium text-sm">{request.processName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {request.submittedBy} · {new Date(request.submittedAt).toLocaleDateString()}
-                        </p>
-                        {request.remarks && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                            <MessageSquare className="h-3 w-3" />
-                            {request.remarks}
-                          </p>
-                        )}
-                      </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="h-12 w-12 rounded-full bg-success/20 flex items-center justify-center mb-4">
+                      <CheckCircle2 className="h-6 w-6 text-success" />
                     </div>
-                    <Badge variant={request.status === "Approved" ? "default" : "destructive"} className="text-xs">
-                      {request.status}
-                    </Badge>
+                    <p className="font-medium">All caught up!</p>
+                    <p className="text-sm text-muted-foreground mt-1">No human decisions needed right now</p>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border bg-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-warning" />
+                  Pending Requests
+                </CardTitle>
+                <CardDescription>Agent decisions can still be overridden.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {pendingRequests.length > 0 ? (
+                  <div className="space-y-4">
+                    {pendingRequests.map((request) => (
+                      <div key={request.id} className="p-4 rounded-lg border border-border bg-secondary/50">
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <FileText className="h-4 w-4 text-primary" />
+                              <h3 className="font-semibold">{request.processName}</h3>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {request.submittedBy}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {new Date(request.submittedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleViewRequest(request)}
+                              className="text-muted-foreground"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Badge variant="secondary" className="text-xs">
+                              {request.id}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <Separator className="my-3" />
+
+                        <div className="grid gap-2 mb-4">
+                          {Object.entries(request.data).map(([key, value]) => (
+                            <div key={key} className="flex justify-between text-sm">
+                              <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
+                              <span className="font-medium text-right max-w-[60%] truncate">
+                                {Array.isArray(value) ? value.join(", ") : value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="flex-1 hover:bg-primary/70"
+                            onClick={() => handleApproveClick(request)}
+                          >
+                            <ThumbsUp className="mr-2 h-4 w-4" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 border-destructive/50 text-primary-foreground hover:bg-destructive/70 bg-destructive"
+                            onClick={() => handleRejectClick(request)}
+                          >
+                            <ThumbsDown className="mr-2 h-4 w-4" />
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="h-12 w-12 rounded-full bg-success/20 flex items-center justify-center mb-4">
+                      <CheckCircle2 className="h-6 w-6 text-success" />
+                    </div>
+                    <p className="font-medium">No pending requests</p>
+                    <p className="text-sm text-muted-foreground mt-1">Everything has been reviewed</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="all-requests">
+            <Card className="border-border bg-card">
+              <CardHeader>
+                <CardTitle>All Requests</CardTitle>
+                <CardDescription>Review any request and override agent decisions.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {requests.length > 0 ? (
+                  <div className="space-y-3">
+                    {requests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"
+                        onClick={() => handleViewRequest(request)}
+                      >
+                        <div className="flex items-center gap-3">
+                          {getStatusIcon(request.status)}
+                          <div>
+                            <p className="font-medium text-sm">{request.processName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {request.submittedBy} · {new Date(request.submittedAt).toLocaleDateString()}
+                            </p>
+                            {request.remarks && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                                <MessageSquare className="h-3 w-3" />
+                                {request.remarks}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {getStatusBadge(request.status)}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                      <FileText className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <p className="font-medium">No requests yet</p>
+                    <p className="text-sm text-muted-foreground mt-1">Requests will appear here once submitted</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Approval/Rejection Confirmation Modal */}
@@ -397,7 +580,7 @@ export default function ApprovalsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* View Request Details with Timeline */}
+      {/* View Request Details */}
       <Dialog open={!!viewingRequest} onOpenChange={() => setViewingRequest(null)}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -419,7 +602,9 @@ export default function ApprovalsPage() {
                   {Object.entries(viewingRequest.data).map(([key, value]) => (
                     <div key={key} className="flex justify-between text-sm">
                       <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
-                      <span className="font-medium text-right max-w-[60%]">{value}</span>
+                      <span className="font-medium text-right max-w-[60%]">
+                        {Array.isArray(value) ? value.join(", ") : value}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -429,7 +614,7 @@ export default function ApprovalsPage() {
               <div className="flex items-center justify-between p-3 rounded-lg border border-border">
                 <div className="flex items-center gap-2">
                   {getStatusIcon(viewingRequest.status)}
-                  <span className="font-medium">{viewingRequest.status}</span>
+                  <span className="font-medium">{getDisplayStatus(viewingRequest.status)}</span>
                 </div>
                 {viewingRequest.decidedBy && (
                   <div className="text-sm text-muted-foreground flex items-center gap-1">
@@ -449,54 +634,34 @@ export default function ApprovalsPage() {
                 </div>
               )}
 
-              <Separator />
-
-              {/* Timeline */}
-              <div>
-                <h4 className="text-sm font-semibold mb-3">Process Timeline</h4>
-                <div className="relative">
-                  {viewingRequest.timeline.map((event, index) => (
-                    <div key={event.id} className="flex gap-3 pb-4 last:pb-0">
-                      {/* Timeline line */}
-                      <div className="flex flex-col items-center">
-                        <div
-                          className={`flex h-6 w-6 items-center justify-center rounded-full ${getTimelineColor(
-                            event.status,
-                            event.type
-                          )}`}
-                        >
-                          {getTimelineIcon(event.type)}
-                        </div>
-                        {index < viewingRequest.timeline.length - 1 && (
-                          <div className="w-px flex-1 bg-border mt-1" />
-                        )}
-                      </div>
-
-                      {/* Timeline content */}
-                      <div className="flex-1 pb-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium">{event.title}</p>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(event.timestamp).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                        {event.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{event.description}</p>
-                        )}
-                        {event.actor && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                            <User className="h-3 w-3" />
-                            {event.actor}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+              {viewingRequest.auditLogUrl && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold">Audit Log</h4>
+                    <a
+                      href={viewingRequest.auditLogUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Open JSON
+                    </a>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs">
+                    {auditLogLoading && <p className="text-muted-foreground">Loading audit log…</p>}
+                    {!auditLogLoading && auditLogError && (
+                      <p className="text-destructive">{auditLogError}</p>
+                    )}
+                    {!auditLogLoading && !auditLogError && auditLogData && (
+                      <pre className="whitespace-pre-wrap break-words">{auditLogData}</pre>
+                    )}
+                    {!auditLogLoading && !auditLogError && !auditLogData && (
+                      <p className="text-muted-foreground">No audit log data available.</p>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
+
             </div>
           )}
 
@@ -504,33 +669,31 @@ export default function ApprovalsPage() {
             <Button variant="outline" onClick={() => setViewingRequest(null)}>
               Close
             </Button>
-            {viewingRequest?.status === "Pending" && (
-              <>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    if (viewingRequest) {
-                      handleRejectClick(viewingRequest)
-                      setViewingRequest(null)
-                    }
-                  }}
-                >
-                  <ThumbsDown className="mr-2 h-4 w-4" />
-                  Reject
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (viewingRequest) {
-                      handleApproveClick(viewingRequest)
-                      setViewingRequest(null)
-                    }
-                  }}
-                >
-                  <ThumbsUp className="mr-2 h-4 w-4" />
-                  Approve
-                </Button>
-              </>
-            )}
+            <>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (viewingRequest) {
+                    handleRejectClick(viewingRequest)
+                    setViewingRequest(null)
+                  }
+                }}
+              >
+                <ThumbsDown className="mr-2 h-4 w-4" />
+                Reject
+              </Button>
+              <Button
+                onClick={() => {
+                  if (viewingRequest) {
+                    handleApproveClick(viewingRequest)
+                    setViewingRequest(null)
+                  }
+                }}
+              >
+                <ThumbsUp className="mr-2 h-4 w-4" />
+                Approve
+              </Button>
+            </>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useGlobalState, type Process, type Request } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
@@ -12,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Separator } from "@/components/ui/separator"
 import {
   Dialog,
   DialogContent,
@@ -29,8 +28,6 @@ import {
   XCircle,
   ChevronRight,
   User,
-  Bot,
-  AlertCircle,
   MessageSquare,
   UserCheck,
   Eye,
@@ -38,31 +35,130 @@ import {
 
 export default function PortalPage() {
   const router = useRouter()
-  const { currentUser, processes, requests, addRequest } = useGlobalState()
+  const { currentUser } = useGlobalState()
+  const [processes, setProcesses] = useState<Process[]>([])
+  const [requests, setRequests] = useState<Request[]>([])
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
+  const [fileUploads, setFileUploads] = useState<Record<string, File[]>>({})
   const [submitted, setSubmitted] = useState(false)
   const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
+  const [auditLogData, setAuditLogData] = useState<string | null>(null)
+  const [auditLogError, setAuditLogError] = useState<string | null>(null)
+  const [auditLogLoading, setAuditLogLoading] = useState(false)
+
+  const getProcessKey = (process: Process) => process.processId || process.id || process.name
+  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
+
+  const fetchProcesses = useCallback(async () => {
+    const response = await fetch("/api/processes")
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    setProcesses(data.processes || [])
+  }, [])
+
+  const fetchRequests = useCallback(async (submittedBy: string) => {
+    const response = await fetch(`/api/requests?submittedBy=${encodeURIComponent(submittedBy)}`)
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    setRequests(data.requests || [])
+  }, [])
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "employee") {
       router.push("/")
+      return
     }
-  }, [currentUser, router])
+
+    const timeoutId = window.setTimeout(() => {
+      void fetchProcesses()
+      void fetchRequests(currentUser.name)
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [currentUser, router, fetchProcesses, fetchRequests])
+
+  useEffect(() => {
+    const auditUrl = viewingRequest?.auditLogUrl
+    if (!auditUrl) {
+      setAuditLogData(null)
+      setAuditLogError(null)
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        setAuditLogLoading(true)
+        setAuditLogError(null)
+        try {
+          const response = await fetch(auditUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to fetch audit log (${response.status})`)
+          }
+          const data = await response.json()
+          setAuditLogData(JSON.stringify(data, null, 2))
+        } catch (error) {
+          setAuditLogError(error instanceof Error ? error.message : "Failed to load audit log")
+        } finally {
+          setAuditLogLoading(false)
+        }
+      })()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [viewingRequest?.auditLogUrl])
 
   if (!currentUser || currentUser.role !== "employee") {
     return null
   }
 
-  const getProcessKey = (process: Process) => process.processId || process.id || process.name
-  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
-
   const myRequests = requests.filter((r) => r.submittedBy === currentUser.name)
 
-  const handleSubmit = () => {
+  const uploadAttachments = async () => {
+    if (!selectedProcess) return {}
+
+    const uploads: Record<string, string[]> = {}
+    const fileFields = getProcessFields(selectedProcess).filter((field) => field.type === "file")
+
+    for (const field of fileFields) {
+      const fieldKey = field.fieldId || field.key || ""
+      if (!fieldKey) continue
+
+      const files = fileUploads[fieldKey]
+      if (!files || files.length === 0) continue
+
+      const body = new FormData()
+      body.append("processId", selectedProcess.processId || selectedProcess.id || selectedProcess.name)
+      body.append("submittedBy", currentUser.name)
+      body.append("fieldKey", fieldKey)
+      files.forEach((file) => body.append("files", file, file.name))
+
+      const response = await fetch("/api/uploads", { method: "POST", body })
+      if (!response.ok) {
+        continue
+      }
+      const data = await response.json()
+      if (Array.isArray(data.urls) && data.urls.length > 0) {
+        uploads[fieldKey] = data.urls
+      }
+    }
+
+    return uploads
+  }
+
+  const handleSubmit = async () => {
     if (!selectedProcess) return
 
     const now = new Date().toISOString()
+    const attachmentUrls = await uploadAttachments()
+    const requestData = {
+      ...formData,
+      ...attachmentUrls,
+    }
     const newRequest: Request = {
       id: `req-${Date.now()}`,
       processId: selectedProcess.processId || selectedProcess.id || selectedProcess.name,
@@ -70,42 +166,28 @@ export default function PortalPage() {
       submittedBy: currentUser.name,
       submittedAt: now,
       status: "Pending",
-      data: formData,
-      timeline: [
-        {
-          id: `evt-${Date.now()}`,
-          timestamp: now,
-          type: "submitted",
-          title: "Request Submitted",
-          description: "Your request has been submitted for processing",
-          actor: currentUser.name,
-          status: "completed",
-        },
-        {
-          id: `evt-${Date.now() + 1}`,
-          timestamp: new Date(Date.now() + 2000).toISOString(),
-          type: "auto_check",
-          title: "Automated Checks",
-          description: "Running automated validation and risk assessment",
-          status: "completed",
-        },
-        {
-          id: `evt-${Date.now() + 2}`,
-          timestamp: new Date(Date.now() + 5000).toISOString(),
-          type: "pending_approval",
-          title: "Pending Approval",
-          description: "Waiting for manager review",
-          status: "current",
-        },
-      ],
+      data: requestData,
     }
 
-    addRequest(newRequest)
+    const response = await fetch("/api/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        processId: newRequest.processId,
+        processName: newRequest.processName,
+        submittedBy: newRequest.submittedBy,
+        data: newRequest.data,
+      }),
+    })
+    if (response.ok) {
+      await fetchRequests(currentUser.name)
+    }
     setSubmitted(true)
     setTimeout(() => {
       setSubmitted(false)
       setSelectedProcess(null)
       setFormData({})
+      setFileUploads({})
     }, 2000)
   }
 
@@ -117,6 +199,8 @@ export default function PortalPage() {
         return <CheckCircle2 className="h-4 w-4 text-success" />
       case "Rejected":
         return <XCircle className="h-4 w-4 text-destructive" />
+      case "Human":
+        return <User className="h-4 w-4 text-primary" />
     }
   }
 
@@ -125,36 +209,13 @@ export default function PortalPage() {
       Pending: "secondary",
       Approved: "default",
       Rejected: "destructive",
+      Human: "outline",
     }
     return (
       <Badge variant={variants[status]} className="text-xs">
         {status}
       </Badge>
     )
-  }
-
-  const getTimelineIcon = (type: string) => {
-    switch (type) {
-      case "submitted":
-        return <Send className="h-3 w-3" />
-      case "auto_check":
-        return <Bot className="h-3 w-3" />
-      case "pending_approval":
-        return <Clock className="h-3 w-3" />
-      case "approved":
-        return <CheckCircle2 className="h-3 w-3" />
-      case "rejected":
-        return <XCircle className="h-3 w-3" />
-      default:
-        return <AlertCircle className="h-3 w-3" />
-    }
-  }
-
-  const getTimelineColor = (status: string, type: string) => {
-    if (status === "current") return "bg-warning text-warning-foreground"
-    if (type === "approved") return "bg-success text-success-foreground"
-    if (type === "rejected") return "bg-destructive text-destructive-foreground"
-    return "bg-primary/20 text-primary"
   }
 
   return (
@@ -242,7 +303,22 @@ export default function PortalPage() {
                         {getProcessFields(selectedProcess).map((field) => (
                           <div key={field.fieldId || field.key} className="space-y-2">
                             <Label htmlFor={field.fieldId || field.key}>{field.label}</Label>
-                            {field.type === "textarea" ? (
+                            {field.type === "file" ? (
+                              <Input
+                                id={field.fieldId || field.key}
+                                type="file"
+                                accept={field.accept}
+                                multiple={field.multiple}
+                                onChange={(e) => {
+                                  const files = e.target.files ? Array.from(e.target.files) : []
+                                  setFileUploads({
+                                    ...fileUploads,
+                                    [field.fieldId || field.key || ""]: files,
+                                  })
+                                }}
+                                className="bg-input"
+                              />
+                            ) : field.type === "textarea" ? (
                               <Textarea
                                 id={field.fieldId || field.key}
                                 placeholder={field.placeholder}
@@ -348,7 +424,7 @@ export default function PortalPage() {
         </Tabs>
       </main>
 
-      {/* View Request Details with Timeline */}
+      {/* View Request Details */}
       <Dialog open={!!viewingRequest} onOpenChange={() => setViewingRequest(null)}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -388,6 +464,34 @@ export default function PortalPage() {
                 </div>
               )}
 
+              {viewingRequest.auditLogUrl && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold">Audit Log</h4>
+                    <a
+                      href={viewingRequest.auditLogUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Open JSON
+                    </a>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs">
+                    {auditLogLoading && <p className="text-muted-foreground">Loading audit log…</p>}
+                    {!auditLogLoading && auditLogError && (
+                      <p className="text-destructive">{auditLogError}</p>
+                    )}
+                    {!auditLogLoading && !auditLogError && auditLogData && (
+                      <pre className="whitespace-pre-wrap break-words">{auditLogData}</pre>
+                    )}
+                    {!auditLogLoading && !auditLogError && !auditLogData && (
+                      <p className="text-muted-foreground">No audit log data available.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Request Details */}
               <div>
                 <h4 className="text-sm font-semibold mb-2">Request Details</h4>
@@ -395,67 +499,14 @@ export default function PortalPage() {
                   {Object.entries(viewingRequest.data).map(([key, value]) => (
                     <div key={key} className="flex justify-between text-sm">
                       <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
-                      <span className="font-medium text-right max-w-[60%]">{value}</span>
+                      <span className="font-medium text-right max-w-[60%]">
+                        {Array.isArray(value) ? value.join(", ") : value}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <Separator />
-
-              {/* Timeline */}
-              <div>
-                <h4 className="text-sm font-semibold mb-3">Process Timeline</h4>
-                <div className="relative">
-                  {viewingRequest.timeline.map((event, index) => (
-                    <div key={event.id} className="flex gap-3 pb-4 last:pb-0">
-                      {/* Timeline line */}
-                      <div className="flex flex-col items-center">
-                        <div
-                          className={`flex h-6 w-6 items-center justify-center rounded-full ${getTimelineColor(
-                            event.status,
-                            event.type
-                          )}`}
-                        >
-                          {getTimelineIcon(event.type)}
-                        </div>
-                        {index < viewingRequest.timeline.length - 1 && (
-                          <div className="w-px flex-1 bg-border mt-1" />
-                        )}
-                      </div>
-
-                      {/* Timeline content */}
-                      <div className="flex-1 pb-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium">{event.title}</p>
-                          <div className="flex items-center gap-2">
-                            {event.status === "current" && (
-                              <Badge variant="secondary" className="text-xs">
-                                In Progress
-                              </Badge>
-                            )}
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(event.timestamp).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                        {event.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{event.description}</p>
-                        )}
-                        {event.actor && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                            <User className="h-3 w-3" />
-                            {event.actor}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
 

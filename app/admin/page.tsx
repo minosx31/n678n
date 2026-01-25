@@ -48,111 +48,7 @@ import {
   ChevronUp,
 } from "lucide-react"
 
-const firewallId = `firewall-${Date.now()}`
-const softwareId = `software-${Date.now()}`
-
-const firewallJson: Process = {
-  processId: firewallId,
-  createdAt: new Date().toISOString(),
-  name: "Firewall Access Request",
-  description: "Opens ports for external IPs.",
-  version: "v1.0",
-  formDefinition: {
-    title: "Firewall Access Request",
-    description: "Provide firewall access details.",
-    fields: [
-      { fieldId: "sourceIp", key: "source_ip", label: "Source IP", type: "text", placeholder: "192.168.x.x", required: true },
-      { fieldId: "port", key: "port", label: "Destination Port", type: "number", placeholder: "443", required: true },
-      { fieldId: "reason", key: "reason", label: "Business Justification", type: "textarea", required: true },
-    ],
-  },
-  policies: [
-    {
-      policyId: "POLICY-SECURITY-001",
-      policyText: "High-risk ports require manager approval.",
-      type: "business-rule",
-      severity: "high",
-    },
-  ],
-  riskDefinitions: [
-    {
-      riskId: "RISK-PORT-001",
-      riskDefinition: "Risk increases for sensitive ports and untrusted IP ranges.",
-      thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
-      description: "Port and IP based risk scoring.",
-    },
-  ],
-  agentConfig: {
-    allowHumanOverride: true,
-    defaultDecision: "H",
-    confidenceThreshold: 0.9,
-  },
-  // Legacy compatibility
-  id: firewallId,
-  fields: [
-    { fieldId: "sourceIp", key: "source_ip", label: "Source IP", type: "text", placeholder: "192.168.x.x" },
-    { fieldId: "port", key: "port", label: "Destination Port", type: "number", placeholder: "443" },
-    { fieldId: "reason", key: "reason", label: "Business Justification", type: "textarea" },
-  ],
-  steps: [
-    { name: "AI Risk Analysis", action: "check_ip_reputation" },
-    { name: "Manager Approval", condition: "risk > 5" },
-  ],
-}
-
-const softwareJson: Process = {
-  processId: softwareId,
-  createdAt: new Date().toISOString(),
-  name: "Software Installation Request",
-  description: "Request installation of new software on your workstation.",
-  version: "v1.0",
-  formDefinition: {
-    title: "Software Installation Request",
-    description: "Provide software request details.",
-    fields: [
-      { fieldId: "softwareName", key: "software_name", label: "Software Name", type: "text", placeholder: "e.g., Visual Studio Code", required: true },
-      { fieldId: "version", key: "version", label: "Version", type: "text", placeholder: "e.g., Latest", required: true },
-      { fieldId: "licenseType", key: "license_type", label: "License Type", type: "select", options: ["Free", "Paid", "Enterprise"], required: true },
-      { fieldId: "justification", key: "justification", label: "Business Justification", type: "textarea", required: true },
-    ],
-  },
-  policies: [
-    {
-      policyId: "POLICY-LICENSE-001",
-      policyText: "Paid software requires IT approval.",
-      type: "business-rule",
-      severity: "medium",
-    },
-  ],
-  riskDefinitions: [
-    {
-      riskId: "RISK-SOFTWARE-001",
-      riskDefinition: "Risk increases for paid or unverified software.",
-      thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
-      description: "Software compliance risk scoring.",
-    },
-  ],
-  agentConfig: {
-    allowHumanOverride: true,
-    defaultDecision: "H",
-    confidenceThreshold: 0.9,
-  },
-  // Legacy compatibility
-  id: softwareId,
-  fields: [
-    { fieldId: "softwareName", key: "software_name", label: "Software Name", type: "text", placeholder: "e.g., Visual Studio Code" },
-    { fieldId: "version", key: "version", label: "Version", type: "text", placeholder: "e.g., Latest" },
-    { fieldId: "licenseType", key: "license_type", label: "License Type", type: "select", options: ["Free", "Paid", "Enterprise"] },
-    { fieldId: "justification", key: "justification", label: "Business Justification", type: "textarea" },
-  ],
-  steps: [
-    { name: "Security Scan", action: "scan_software_registry" },
-    { name: "License Verification", action: "check_license_availability" },
-    { name: "IT Approval", condition: "is_paid_software" },
-  ],
-}
-
-const FIELD_TYPES = ["text", "number", "textarea", "select", "email", "array"] as const
+const FIELD_TYPES = ["text", "number", "textarea", "select", "email", "array", "file"] as const
 export default function AdminPage() {
   const router = useRouter()
   const { currentUser, processes, addProcess, updateProcess, deleteProcess } = useGlobalState()
@@ -222,105 +118,38 @@ export default function AdminPage() {
       setGeneratedRisks(data.process.riskDefinitions || [])
     } catch (error) {
       console.error("Error generating process:", error)
-      const lowerInput = input.toLowerCase()
-      if (lowerInput.includes("firewall")) {
-        const fallbackId = `firewall-${Date.now()}`
-        const fallbackProcess: Process = {
-          ...firewallJson,
-          processId: fallbackId,
-          id: fallbackId,
-          createdAt: new Date().toISOString(),
-        }
-        setGeneratedProcess(fallbackProcess)
-        setGeneratedFields(getProcessFields(fallbackProcess))
-        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
-      } else if (lowerInput.includes("software")) {
-        const fallbackId = `software-${Date.now()}`
-        const fallbackProcess: Process = {
-          ...softwareJson,
-          processId: fallbackId,
-          id: fallbackId,
-          createdAt: new Date().toISOString(),
-        }
-        setGeneratedProcess(fallbackProcess)
-        setGeneratedFields(getProcessFields(fallbackProcess))
-        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
-      } else {
-        const fallbackId = `process-${Date.now()}`
-        const fallbackProcess: Process = {
-          processId: fallbackId,
-          createdAt: new Date().toISOString(),
-          name: "Generic Approval Process",
-          description: "A custom approval workflow generated from your description.",
-          version: "v1.0",
-          formDefinition: {
-            title: "Generic Approval Process",
-            description: "Provide details for your request.",
-            fields: [
-              {
-                fieldId: "requestDetails",
-                key: "request_details",
-                label: "Request Details",
-                type: "textarea",
-                placeholder: "Describe your request...",
-                required: true,
-              },
-            ],
-          },
-          policies: [
-            {
-              policyId: "POLICY-GENERIC-001",
-              policyText: "Requests require review when risk exceeds threshold.",
-              type: "business-rule",
-              severity: "medium",
-            },
-          ],
-          riskDefinitions: [
-            {
-              riskId: "RISK-GENERIC-001",
-              riskDefinition: "Risk is based on request complexity and impact.",
-              thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
-              description: "Generic risk scoring.",
-            },
-          ],
-          agentConfig: {
-            allowHumanOverride: true,
-            defaultDecision: "H",
-            confidenceThreshold: 0.9,
-          },
-          // Legacy compatibility
-          id: fallbackId,
-          fields: [
-            {
-              fieldId: "requestDetails",
-              key: "request_details",
-              label: "Request Details",
-              type: "textarea",
-              placeholder: "Describe your request...",
-            },
-          ],
-          steps: [
-            { name: "Initial Review", action: "auto_review" },
-            { name: "Manager Approval", condition: "requires_approval" },
-          ],
-        }
-        setGeneratedProcess(fallbackProcess)
-        setGeneratedFields(getProcessFields(fallbackProcess))
-        setGeneratedRisks(fallbackProcess.riskDefinitions || [])
-      }
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const samplePrompt =
-    "We need an approval process for firewall changes. Collect source IP, destination IP, port, protocol, and business justification. " +
-    "Run automated IP reputation checks and flag high-risk ports (22, 3389) for security review. " +
-    "Auto-approve low-risk requests; route medium risk to manager; high risk to security team."
-
-  const handleUseSamplePrompt = () => {
-    setInput(samplePrompt)
-  }
+  const samplePrompts = [
+    {
+      label: "Firewall change",
+      text:
+        "We need an approval process for firewall changes. Collect source IP, destination IP, port, protocol, and business justification. " +
+        "Run automated IP reputation checks and flag high-risk ports (22, 3389) for security review. " +
+        "Auto-approve low-risk requests; route medium risk to manager; high risk to security team.",
+    },
+    {
+      label: "Software purchase",
+      text:
+        "We need a software purchase request process. Collect software name, vendor, cost, license type, and justification. " +
+        "Check budget availability and license inventory. Auto-approve if cost < $500 and license is available; otherwise route to manager.",
+    },
+    {
+      label: "Access to production",
+      text:
+        "We need an approval process for temporary production access. Collect user, system, duration, and justification. " +
+        "Require manager approval if duration > 24 hours and security approval for admin access. Auto-approve low-risk read-only access.",
+    },
+    {
+      label: "Vendor onboarding",
+      text:
+        "We need a vendor onboarding process. Collect vendor name, contract value, data access level, and compliance documents. " +
+        "Run policy checks for data access and route high-risk vendors to security and legal review.",
+    },
+  ]
 
   const handleReferenceUpload = (file: File | null) => {
     if (!file) {
@@ -644,13 +473,21 @@ export default function AdminPage() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                 />
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={handleUseSamplePrompt}>
-                    Use sample prompt
-                  </Button>
+                <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">
                     Not sure what to type? Use a starter prompt and edit it.
                   </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const randomPrompt = samplePrompts[Math.floor(Math.random() * samplePrompts.length)]
+                      setInput(randomPrompt.text)
+                    }}
+                  >
+                    Use random sample prompt
+                  </Button>
                 </div>
 
                 <Separator />
@@ -850,7 +687,7 @@ export default function AdminPage() {
                                         <SelectValue />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {FIELD_TYPES.filter((type) => type !== "array" && type !== "textarea").map((type) => (
+                                        {FIELD_TYPES.filter((type) => type !== "array" && type !== "textarea" && type !== "file").map((type) => (
                                           <SelectItem key={type} value={type} className="capitalize">
                                             {type}
                                           </SelectItem>
