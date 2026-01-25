@@ -13,11 +13,13 @@ export interface FormField {
   fieldId: string
   key?: string
   label: string
-  type: "text" | "number" | "textarea" | "select" | "email" | "array"
+  type: "text" | "number" | "textarea" | "select" | "email" | "array" | "file"
   required?: boolean
   placeholder?: string
   options?: string[]
   itemType?: "text" | "number" | "email" | "select"
+  multiple?: boolean
+  accept?: string
   validation?: {
     maxLength?: number
     min?: number
@@ -93,12 +95,13 @@ export interface Request {
   processName: string
   submittedBy: string
   submittedAt: string
-  status: "Pending" | "Approved" | "Rejected"
-  data: Record<string, string | number>
+  status: "Pending" | "Approved" | "Rejected" | "Human"
+  data: Record<string, string | number | string[]>
   remarks?: string
   decidedBy?: string
   decidedAt?: string
-  timeline: TimelineEvent[]
+  auditLogUrl?: string
+  timeline?: TimelineEvent[]
 }
 
 interface GlobalState {
@@ -110,7 +113,7 @@ interface GlobalState {
   updateProcess: (process: Process) => void
   deleteProcess: (id: string) => void
   addRequest: (request: Request) => void
-  updateRequestStatus: (id: string, status: "Approved" | "Rejected", remarks?: string, decidedBy?: string) => void
+  updateRequestStatus: (id: string, status: "Approved" | "Rejected" | "Human", remarks?: string, decidedBy?: string) => void
 }
 
 const GlobalStateContext = createContext<GlobalState | undefined>(undefined)
@@ -304,7 +307,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
     setRequests((prev) => [...prev, request])
   }
 
-  const updateRequestStatus = (id: string, status: "Approved" | "Rejected", remarks?: string, decidedBy?: string) => {
+  const updateRequestStatus = (id: string, status: "Approved" | "Rejected" | "Human", remarks?: string, decidedBy?: string) => {
     setRequests((prev) => prev.map((req) => {
       if (req.id !== id) return req
       
@@ -319,8 +322,10 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
         status: "completed",
       }
       
+      const baseTimeline = req.timeline ?? []
+
       // Update pending events to completed
-      const updatedTimeline = req.timeline.map(evt => 
+      const updatedTimeline = baseTimeline.map((evt) =>
         evt.status === "current" ? { ...evt, status: "completed" as const } : evt
       )
       
@@ -330,7 +335,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
         remarks,
         decidedBy,
         decidedAt: now,
-        timeline: [...updatedTimeline, newEvent],
+        timeline: updatedTimeline.length > 0 ? [...updatedTimeline, newEvent] : [newEvent],
       }
     }))
   }
