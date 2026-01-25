@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       .update({
         status: body.status,
         remarks: body.remarks || null,
-        decided_by: body.decidedBy || null,
+        decided_by: body.decidedBy || "System",
         decided_at: decidedAt,
         audit_log_url: body.auditLogUrl || null,
       })
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
         requestId: body.requestId,
         status: body.status,
         remarks: body.remarks || null,
-        decidedBy: body.decidedBy || null,
+        decidedBy: body.decidedBy || "System",
         decidedAt,
         auditLogUrl: body.auditLogUrl || null,
       },

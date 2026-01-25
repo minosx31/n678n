@@ -76,7 +76,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    type RequestRow = { submitted_by?: string } & Record<string, unknown>
+    type RequestRow = {
+      submitted_by?: string
+      decided_by?: string | null
+      decided_at?: string | null
+    } & Record<string, unknown>
 
     const requestRows = (data || []) as RequestRow[]
     const submittedIds = Array.from(
@@ -100,6 +104,8 @@ export async function GET(request: NextRequest) {
     const requests = requestRows.map((row) => ({
       ...row,
       submittedBy: row.submitted_by ? userNameById.get(row.submitted_by) || row.submitted_by : row.submitted_by,
+      decidedBy: row.decided_by ?? null,
+      decidedAt: row.decided_at ?? null,
     }))
 
     return NextResponse.json({
