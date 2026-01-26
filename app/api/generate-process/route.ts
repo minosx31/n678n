@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { GoogleGenerativeAI } from "@google/generative-ai"
-import type { Process } from "@/context/global-state"
+import type { FormField, RiskDefinition } from "@/context/global-state"
 
 export interface GenerateProcessRequest {
   description: string
@@ -26,7 +26,7 @@ Structure your response exactly as follows (strictly JSON, no markdown):
     "description": "Form description",
     "fields": [
       {
-        "fieldId": "field_key_camelCase",
+        "fieldId": "fieldKeyCamelCase",
         "label": "Human Readable Label",
         "type": "text" | "number" | "array" | "email" | "select" | "file",
         "required": true,
@@ -37,24 +37,24 @@ Structure your response exactly as follows (strictly JSON, no markdown):
   },
   "policies": [
     {
-      "policyId": "POLICY-TYPE-001",
-      "policyText": "Clear business rule (e.g., 'Loan-to-income ratio must be ≤ 0.30')",
+      "policy_id": "policy_type_001",
+      "policy_text": "Clear business rule (e.g., 'Loan-to-income ratio must be ≤ 0.30')",
       "type": "business-rule",
       "severity": "high" | "medium" | "low"
     }
   ],
   "riskDefinitions": [
     {
-      "riskId": "RISK-TYPE-001",
-      "riskDefinition": "Logic description (e.g., 'Risk score = weighted average of...')",
+      "risk_id": "risk_type_001",
+      "risk_definition": "Logic description (e.g., 'Risk score = weighted average of...')",
       "thresholds": { "low": 0.3, "medium": 0.6, "high": 1.0 },
       "description": "Explanation of what this risk measures"
     }
   ],
-  "agentConfig": {
-    "allowHumanOverride": true,
-    "defaultDecision": "H", // H = Human, A = Approve, R = Reject
-    "confidenceThreshold": 0.90
+  "agent_config": {
+    "allow_human_override": true,
+    "default_decision": "H", // H = Human, A = Approve, R = Reject
+    "confidence_threshold": 0.90
   }
 }
 
@@ -66,7 +66,7 @@ Structure your response exactly as follows (strictly JSON, no markdown):
 5. **Format:** Return ONLY raw JSON.
 `
 
-async function generateWithGemini(description: string, referenceText?: string): Promise<Process | null> {
+async function generateWithGemini(description: string, referenceText?: string): Promise<Record<string, unknown> | null> {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
     const trimmedReference = referenceText?.trim()
@@ -102,18 +102,104 @@ Generate the Process Context JSON:`
     
     // Parse the JSON
     const parsed = JSON.parse(cleanedText)
-    
-    // Validate required fields based on Data_Contracts schema
-    if (!parsed.name || !parsed.formDefinition || !parsed.policies) {
+
+    const normalizeProcess = (input: Record<string, unknown>): Record<string, unknown> => {
+      const formDefinition = (input.form_definition || input.formDefinition) as Record<string, unknown> | undefined
+      const fields = Array.isArray(formDefinition?.fields) ? formDefinition?.fields : []
+
+      const normalizedFields = fields.map((field, index) => {
+        const rawField = field as Record<string, unknown>
+        const fieldId =
+          (rawField.field_id as string) ||
+          (rawField.fieldId as string) ||
+          (rawField.key as string) ||
+          `field_${index + 1}`
+
+        return {
+          fieldId: fieldId,
+          key: (rawField.key as string) || fieldId,
+          label: (rawField.label as string) || "",
+          type: (rawField.type as FormField["type"]) || "text",
+          required: rawField.required as boolean | undefined,
+          placeholder: rawField.placeholder as string | undefined,
+          options: rawField.options as string[] | undefined,
+          itemType: (rawField.item_type as FormField["item_type"]) || (rawField.itemType as FormField["item_type"]) || undefined,
+          multiple: rawField.multiple as boolean | undefined,
+          accept: rawField.accept as string | undefined,
+          validation: rawField.validation as FormField["validation"] | undefined,
+        }
+      })
+
+      const normalizedFormDefinition = formDefinition
+        ? {
+            ...formDefinition,
+            title: (formDefinition.title as string) || (input.name as string) || "",
+            description: (formDefinition.description as string) || (input.description as string) || "",
+            fields: normalizedFields,
+          }
+        : undefined
+
+      const policies = Array.isArray(input.policies) ? (input.policies as Record<string, unknown>[]) : []
+      const normalizedPolicies = policies.map((policy) => ({
+        policy_id: (policy.policy_id as string) || (policy.policyId as string) || undefined,
+        process_id: policy.process_id as string | undefined,
+        policy_text: (policy.policy_text as string) || (policy.policyText as string) || "",
+        type: (policy.type as "business-rule") || "business-rule",
+        severity: (policy.severity as "high" | "medium" | "low") || "medium",
+        version: policy.version as string | undefined,
+        created_at: policy.created_at as string | undefined,
+      }))
+
+      const risks = Array.isArray(input.risk_definitions)
+        ? (input.risk_definitions as Record<string, unknown>[]) 
+        : Array.isArray(input.riskDefinitions)
+          ? (input.riskDefinitions as Record<string, unknown>[]) 
+          : []
+
+      const normalizedRisks = risks.map((risk) => ({
+        riskId: (risk.risk_id as string) || (risk.riskId as string) || undefined,
+        riskDefinition: (risk.risk_definition as string) || (risk.riskDefinition as string) || "",
+        thresholds: (risk.thresholds as RiskDefinition["thresholds"]) || { low: 0.3, medium: 0.6, high: 1.0 },
+        description: risk.description as string | undefined,
+        version: risk.version as string | undefined,
+        createdAt: risk.created_at as string | undefined,
+      }))
+
+      const agentConfig = (input.agent_config || input.agentConfig) as Record<string, unknown> | undefined
+      const normalizedAgentConfig = agentConfig
+        ? {
+            allowHumanOverride:
+              (agentConfig.allow_human_override as boolean) ?? (agentConfig.allowHumanOverride as boolean) ?? true,
+            defaultDecision:
+              (agentConfig.default_decision as "H" | "A" | "R") ||
+              (agentConfig.defaultDecision as "H" | "A" | "R") ||
+              "H",
+            confidenceThreshold:
+              (agentConfig.confidence_threshold as number) ?? (agentConfig.confidenceThreshold as number) ?? 0.9,
+          }
+        : undefined
+
+      return {
+        name: (input.name as string) || "",
+        description: (input.description as string) || "",
+        version: (input.version as string) || "v1.0",
+        formDefinition: normalizedFormDefinition,
+        policies: normalizedPolicies,
+        riskDefinitions: normalizedRisks,
+        agentConfig: normalizedAgentConfig,
+      }
+    }
+
+    const normalized = normalizeProcess(parsed)
+
+    if (!normalized.name || !normalized.formDefinition || !normalized.policies) {
       throw new Error("Invalid process structure from LLM")
     }
-    
-    // Return the parsed object directly as it matches the desired schema
-    // We inject an ID and timestamps since the LLM doesn't generate dynamic server data
+
     return {
-      processId: `PROC-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      ...parsed
+      process_id: `PROC-${Date.now()}`,
+      created_at: new Date().toISOString(),
+      ...normalized,
     }
 
   } catch (error) {

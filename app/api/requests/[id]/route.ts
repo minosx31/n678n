@@ -23,7 +23,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { status, decidedBy, remarks } = body
+    const { status, decided_by, remarks } = body
 
     if (!status || !["Approved", "Rejected"].includes(status)) {
       return NextResponse.json(
@@ -39,11 +39,11 @@ export async function PATCH(
       .update({
         status,
         remarks: remarks || null,
-        decided_by: decidedBy || "System",
+        decided_by: decided_by || "System",
         decided_at: decidedAt,
       })
-      .eq("request_code", id)
-      .select("request_code")
+      .eq("request_id", id)
+      .select("request_id")
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -55,10 +55,10 @@ export async function PATCH(
 
     return NextResponse.json({
       request: {
-        id,
+        request_id: id,
         status,
-        decidedBy: decidedBy || "System",
-        decidedAt,
+        decided_by: decided_by || "System",
+        decided_at: decidedAt,
         remarks: remarks || null,
       },
       message: `Request ${id} has been ${status.toLowerCase()}`,

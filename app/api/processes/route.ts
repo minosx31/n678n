@@ -4,17 +4,17 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 
 const fallbackProcesses: Process[] = [
   {
-    processId: "laptop-request",
-    createdAt: "2026-01-10T09:00:00Z",
+    process_id: "laptop-request",
+    created_at: "2026-01-10T09:00:00Z",
     name: "Laptop Request",
     description: "Request a new laptop or laptop upgrade for your work needs.",
     version: "v1.0",
-    formDefinition: {
+    form_definition: {
       title: "Laptop Request",
       description: "Provide details for your laptop request.",
       fields: [
         {
-          fieldId: "laptopType",
+          field_id: "laptop_type",
           key: "laptop_type",
           label: "Laptop Type",
           type: "select",
@@ -22,7 +22,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "specs",
+          field_id: "specs",
           key: "specs",
           label: "Required Specifications",
           type: "text",
@@ -30,7 +30,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "justification",
+          field_id: "justification",
           key: "justification",
           label: "Business Justification",
           type: "textarea",
@@ -38,7 +38,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "quotes",
+          field_id: "quotes",
           key: "quotes",
           label: "Vendor Quotes",
           type: "file",
@@ -49,38 +49,36 @@ const fallbackProcesses: Process[] = [
     },
     policies: [
       {
-        policyId: "POLICY-BUDGET-001",
-        policyText: "Requests over $1500 require manager approval.",
+        policy_text: "Requests over $1500 require manager approval.",
         type: "business-rule",
         severity: "high",
       },
     ],
-    riskDefinitions: [
+    risk_definitions: [
       {
-        riskId: "RISK-COST-001",
-        riskDefinition: "Risk increases when cost exceeds budget thresholds.",
+        risk_definition: "Risk increases when cost exceeds budget thresholds.",
         thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
         description: "Cost-based risk assessment for hardware requests.",
       },
     ],
-    agentConfig: {
-      allowHumanOverride: true,
-      defaultDecision: "H",
-      confidenceThreshold: 0.9,
+    agent_config: {
+      allow_human_override: true,
+      default_decision: "H",
+      confidence_threshold: 0.9,
     },
   },
   {
-    processId: "leave-approval",
-    createdAt: "2026-01-12T09:00:00Z",
+    process_id: "leave-approval",
+    created_at: "2026-01-12T09:00:00Z",
     name: "Leave Approval",
     description: "Request time off and route for approval.",
     version: "v1.0",
-    formDefinition: {
+    form_definition: {
       title: "Leave Request",
       description: "Provide details for your leave request.",
       fields: [
         {
-          fieldId: "leaveType",
+          field_id: "leave_type",
           key: "leave_type",
           label: "Leave Type",
           type: "select",
@@ -88,7 +86,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "startDate",
+          field_id: "start_date",
           key: "start_date",
           label: "Start Date",
           type: "text",
@@ -96,7 +94,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "endDate",
+          field_id: "end_date",
           key: "end_date",
           label: "End Date",
           type: "text",
@@ -104,7 +102,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "reason",
+          field_id: "reason",
           key: "reason",
           label: "Reason",
           type: "textarea",
@@ -112,7 +110,7 @@ const fallbackProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "supportingDocs",
+          field_id: "supporting_docs",
           key: "supporting_docs",
           label: "Supporting Documents",
           type: "file",
@@ -123,24 +121,22 @@ const fallbackProcesses: Process[] = [
     },
     policies: [
       {
-        policyId: "POLICY-LEAVE-001",
-        policyText: "Leave requests exceeding 10 business days require senior approval.",
+        policy_text: "Leave requests exceeding 10 business days require senior approval.",
         type: "business-rule",
         severity: "medium",
       },
     ],
-    riskDefinitions: [
+    risk_definitions: [
       {
-        riskId: "RISK-COVERAGE-001",
-        riskDefinition: "Risk increases when team coverage falls below 60%.",
+        risk_definition: "Risk increases when team coverage falls below 60%.",
         thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
         description: "Coverage-based risk assessment for leave.",
       },
     ],
-    agentConfig: {
-      allowHumanOverride: true,
-      defaultDecision: "H",
-      confidenceThreshold: 0.85,
+    agent_config: {
+      allow_human_override: true,
+      default_decision: "H",
+      confidence_threshold: 0.85,
     },
   },
 ]
@@ -159,15 +155,15 @@ export async function GET() {
     }
 
     const processes = (data || []).map((row) => ({
-      processId: row.process_id,
-      createdAt: row.created_at,
+      process_id: row.process_id,
+      created_at: row.created_at,
       name: row.name,
       description: row.description,
       version: row.version,
-      formDefinition: row.form_definition,
+      form_definition: row.form_definition,
       policies: row.policies,
-      riskDefinitions: row.risk_definitions,
-      agentConfig: row.agent_config,
+      risk_definitions: row.risk_definitions,
+      agent_config: row.agent_config,
     })) as Process[]
 
     return NextResponse.json({
@@ -184,29 +180,29 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    if (!body.name || !body.formDefinition || !body.policies || !body.agentConfig) {
+    if (!body.name || !body.form_definition || !body.policies || !body.agent_config) {
       return NextResponse.json(
-        { error: "Missing required fields: name, formDefinition, policies, agentConfig" },
+        { error: "Missing required fields: name, form_definition, policies, agent_config" },
         { status: 400 }
       )
     }
 
     const supabase = getSupabaseServerClient()
-    const processId = body.processId || `process-${Date.now()}`
+    const processId = body.process_id || `process-${Date.now()}`
     const now = new Date().toISOString()
 
     const { data, error } = await supabase
       .from("processes")
       .insert({
         process_id: processId,
-        created_at: body.createdAt || now,
+        created_at: body.created_at || now,
         name: body.name,
         description: body.description || "",
         version: body.version || "v1.0",
-        form_definition: body.formDefinition,
+        form_definition: body.form_definition,
         policies: body.policies,
-        risk_definitions: body.riskDefinitions || [],
-        agent_config: body.agentConfig,
+        risk_definitions: body.risk_definitions || [],
+        agent_config: body.agent_config,
       })
       .select()
 

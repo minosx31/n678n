@@ -67,12 +67,12 @@ export async function POST(request: NextRequest) {
       ok: true,
       message: "Decision received",
       decision: {
-        requestId: body.requestId,
+        request_id: body.requestId,
         status,
         remarks: remarks || null,
-        decidedBy: "System",
-        decidedAt,
-        auditLogUrl: body.auditUrl || null,
+        decided_by: "System",
+        decided_at: decidedAt,
+        audit_log_url: body.auditUrl || null,
       },
     })
 

@@ -2,43 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import type { Request } from "@/context/global-state"
 import { getSupabaseServerClient } from "@/lib/supabase/server"
 
-async function insertRequestToSupabase(request: Request) {
-  try {
-    const supabase = getSupabaseServerClient()
-    const { data, error } = await supabase
-      .from("requests")
-      .insert({
-        request_code: request.id,
-        process_id: request.processId,
-        process_name: request.processName,
-        submitted_by: request.submittedBy,
-        status: request.status,
-        submitted_at: request.submittedAt,
-        remarks: request.remarks || null,
-        decided_by: request.decidedBy || null,
-        decided_at: request.decidedAt || null,
-        data: request.data,
-      })
-      .select()
-
-    if (error) {
-      return { ok: false, error: error.message }
-    }
-
-    return { ok: true, data }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" }
-  }
-}
-
 // GET - Fetch all requests with optional filters
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient()
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get("status")
-    const submittedBy = searchParams.get("submittedBy")
-    const processId = searchParams.get("processId")
+    const submittedBy = searchParams.get("submitted_by")
+    const processId = searchParams.get("process_id")
 
     let submittedById: string | null = null
     if (submittedBy) {
@@ -54,7 +25,7 @@ export async function GET(request: NextRequest) {
 
       submittedById = userRows?.[0]?.id ?? null
       if (!submittedById) {
-        return NextResponse.json({ requests: [], total: 0, filters: { status, submittedBy, processId } })
+        return NextResponse.json({ requests: [], total: 0, filters: { status, submitted_by: submittedBy, process_id: processId } })
       }
     }
 
@@ -103,15 +74,15 @@ export async function GET(request: NextRequest) {
 
     const requests = requestRows.map((row) => ({
       ...row,
-      submittedBy: row.submitted_by ? userNameById.get(row.submitted_by) || row.submitted_by : row.submitted_by,
-      decidedBy: row.decided_by ?? null,
-      decidedAt: row.decided_at ?? null,
+      submitted_by: row.submitted_by ? userNameById.get(row.submitted_by) || row.submitted_by : row.submitted_by,
+      decided_by: row.decided_by ?? null,
+      decided_at: row.decided_at ?? null,
     }))
 
     return NextResponse.json({
       requests,
       total: requests.length,
-      filters: { status, submittedBy, processId },
+      filters: { status, submitted_by: submittedBy, process_id: processId },
     })
   } catch (error) {
     return NextResponse.json(
@@ -127,9 +98,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     
     // Validate required fields
-    if (!body.processId || !body.processName || !body.submittedBy || !body.data) {
+    if (!body.process_id || !body.process_name || !body.submitted_by || !body.data) {
       return NextResponse.json(
-        { error: "Missing required fields: processId, processName, submittedBy, data" },
+        { error: "Missing required fields: process_id, process_name, submitted_by, data" },
         { status: 400 }
       )
     }
@@ -138,7 +109,7 @@ export async function POST(request: NextRequest) {
     const { data: userRows, error: userError } = await supabase
       .from("users")
       .select("id")
-      .eq("name", body.submittedBy)
+      .eq("name", body.submitted_by)
       .limit(1)
 
     if (userError) {
@@ -158,42 +129,44 @@ export async function POST(request: NextRequest) {
       return `req-${datePart}-${timePart}`
     }
 
+    const approvalCallbackUrl = new URL("/api/approval-decision", request.nextUrl.origin).toString()
+
+    const handlerEndpoint = process.env.REQUEST_HANDLER_SERVICE_URL
+    if (!handlerEndpoint) {
+      return NextResponse.json({ error: "REQUEST_HANDLER_SERVICE_URL is not configured" }, { status: 500 })
+    }
+
     const newRequest: Request = {
-      id: formatRequestId(now),
-      processId: body.processId,
-      processName: body.processName,
-      submittedBy: submittedById,
-      submittedAt,
+      request_id: formatRequestId(now),
+      process_id: body.process_id,
+      process_name: body.process_name,
+      submitted_by: submittedById,
+      submitted_at: submittedAt,
       status: "Pending",
       data: body.data,
     }
 
-    const supabaseResult = await insertRequestToSupabase(newRequest)
-    if (!supabaseResult.ok) {
-      console.error("Supabase insert failed:", supabaseResult.error)
-      return NextResponse.json(
-        { error: supabaseResult.error || "Failed to create request" },
-        { status: 500 }
-      )
-    }
+    const handlerResponse = await fetch(handlerEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestContext: {
+          requestId: newRequest.request_id,
+          processId: newRequest.process_id,
+          webhookUrl: approvalCallbackUrl,
+          submittedBy: newRequest.submitted_by,
+          submittedAt: submittedAt,
+        },
+        formData: newRequest.data,
+      }),
+    })
 
-    const workflowEndpoint = process.env.WORKFLOW_ENDPOINT_URL
-    if (workflowEndpoint) {
-      try {
-        const approvalCallbackUrl = new URL("/api/approval-decision", request.nextUrl.origin).toString()
-        await fetch(workflowEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            request_code: newRequest.id,
-            process_id: newRequest.processId,
-            data: newRequest.data,
-            approval_callback_url: approvalCallbackUrl,
-          }),
-        })
-      } catch (error) {
-        console.error("Failed to notify workflow endpoint:", error)
-      }
+    if (!handlerResponse.ok) {
+      const errorText = await handlerResponse.text()
+      return NextResponse.json(
+        { error: errorText || "Failed to submit approval request" },
+        { status: handlerResponse.status }
+      )
     }
 
     return NextResponse.json({ request: newRequest }, { status: 201 })
