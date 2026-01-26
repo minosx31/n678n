@@ -231,7 +231,7 @@ export default function PortalPage() {
         continue
       }
       const data = await response.json()
-      const url = data.url || (Array.isArray(data.urls) ? data.urls[0] : null)
+      const url = data.document_url || null
       if (url) {
         uploads[fieldKey] = url
       }

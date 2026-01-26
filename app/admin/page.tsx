@@ -194,7 +194,7 @@ export default function AdminPage() {
 
       const data = await response.json()
       setReferenceText(data.text || data.content || "")
-      setReferenceUrl(data.url || null)
+      setReferenceUrl(data.document_url || null)
       setIsReadingReference(false)
     }
 
