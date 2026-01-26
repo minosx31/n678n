@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useGlobalState, type Process, type Request } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
+import { useToast } from "@/hooks/use-toast"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,37 +38,79 @@ import {
 export default function PortalPage() {
   const router = useRouter()
   const { currentUser } = useGlobalState()
+  const { toast } = useToast()
   const [processes, setProcesses] = useState<Process[]>([])
   const [requests, setRequests] = useState<Request[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
-  const [fileUploads, setFileUploads] = useState<Record<string, File[]>>({})
+  const [fileUploads, setFileUploads] = useState<Record<string, File | null>>({})
   const [submitted, setSubmitted] = useState(false)
   const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
   const [auditLogData, setAuditLogData] = useState<string | null>(null)
   const [auditLogError, setAuditLogError] = useState<string | null>(null)
   const [auditLogLoading, setAuditLogLoading] = useState(false)
+  const lastStatusByRequestId = useRef<Record<string, string>>({})
+  const hasInitializedStatuses = useRef(false)
 
-  const getProcessKey = (process: Process) => process.processId || process.id || process.name
-  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
+  const getProcessKey = (process: Process) => process.process_id || process.name
+  const getProcessFields = (process: Process) => process.form_definition?.fields ?? []
 
   const fetchProcesses = useCallback(async () => {
-    const response = await fetch("/api/processes")
-    if (!response.ok) {
-      return
+    try {
+      const response = await fetch("/api/processes")
+      if (!response.ok) {
+        throw new Error("Failed to load processes")
+      }
+      const data = await response.json()
+      setProcesses(data.processes || [])
+    } catch (error) {
+      toast({
+        title: "Unable to load processes",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
     }
-    const data = await response.json()
-    setProcesses(data.processes || [])
-  }, [])
+  }, [toast])
 
   const fetchRequests = useCallback(async (submittedBy: string) => {
-    const response = await fetch(`/api/requests?submittedBy=${encodeURIComponent(submittedBy)}`)
-    if (!response.ok) {
-      return
+    try {
+      const response = await fetch(`/api/requests?submitted_by=${encodeURIComponent(submittedBy)}`)
+      if (!response.ok) {
+        throw new Error("Failed to load requests")
+      }
+      const data = await response.json()
+      const nextRequests: Request[] = data.requests || []
+      setRequests(nextRequests)
+
+      const myRequests = nextRequests.filter((request) => request.submitted_by === submittedBy)
+      if (!hasInitializedStatuses.current) {
+        lastStatusByRequestId.current = Object.fromEntries(
+          myRequests.map((request) => [request.request_id, request.status])
+        )
+        hasInitializedStatuses.current = true
+        return
+      }
+
+      myRequests.forEach((request) => {
+        const previousStatus = lastStatusByRequestId.current[request.request_id]
+        if (previousStatus && previousStatus !== request.status) {
+          const displayStatus = request.status === "Human" ? "Needs Review" : request.status
+          toast({
+            title: "Decision received",
+            description: `${request.process_name} is now ${displayStatus}.`,
+          })
+        }
+        lastStatusByRequestId.current[request.request_id] = request.status
+      })
+    } catch (error) {
+      toast({
+        title: "Unable to load requests",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
     }
-    const data = await response.json()
-    setRequests(data.requests || [])
-  }, [])
+  }, [toast])
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "employee") {
@@ -75,15 +119,35 @@ export default function PortalPage() {
     }
 
     const timeoutId = window.setTimeout(() => {
-      void fetchProcesses()
-      void fetchRequests(currentUser.name)
+      void (async () => {
+        try {
+          await Promise.all([
+            fetchProcesses(),
+            fetchRequests(currentUser.name),
+          ])
+        } finally {
+          setIsLoading(false)
+        }
+      })()
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
   }, [currentUser, router, fetchProcesses, fetchRequests])
 
   useEffect(() => {
-    const auditUrl = viewingRequest?.auditLogUrl
+    if (!currentUser || currentUser.role !== "employee") {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchRequests(currentUser.name)
+    }, 15000)
+
+    return () => window.clearInterval(intervalId)
+  }, [currentUser, fetchRequests])
+
+  useEffect(() => {
+    const auditUrl = viewingRequest?.audit_log_url
     if (!auditUrl) {
       setAuditLogData(null)
       setAuditLogError(null)
@@ -110,41 +174,75 @@ export default function PortalPage() {
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
-  }, [viewingRequest?.auditLogUrl])
+  }, [viewingRequest?.audit_log_url])
 
   if (!currentUser || currentUser.role !== "employee") {
     return null
   }
 
-  const myRequests = requests.filter((r) => r.submittedBy === currentUser.name)
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <AppHeader title="Employee Portal" />
+        <main className="p-6 max-w-6xl mx-auto space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-4">
+              <Skeleton className="h-10 w-48" />
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+            </div>
+            <div className="space-y-4">
+              <Skeleton className="h-10 w-56" />
+              <Skeleton className="h-[360px] w-full" />
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  const myRequests = requests.filter((r) => r.submitted_by === currentUser.name)
 
   const uploadAttachments = async () => {
     if (!selectedProcess) return {}
 
-    const uploads: Record<string, string[]> = {}
+    const uploads: Record<string, string> = {}
     const fileFields = getProcessFields(selectedProcess).filter((field) => field.type === "file")
+    let failedUploads = 0
 
     for (const field of fileFields) {
-      const fieldKey = field.fieldId || field.key || ""
+      const fieldKey = field.field_id || field.key || ""
       if (!fieldKey) continue
 
-      const files = fileUploads[fieldKey]
-      if (!files || files.length === 0) continue
+      const file = fileUploads[fieldKey]
+      if (!file) continue
 
       const body = new FormData()
-      body.append("processId", selectedProcess.processId || selectedProcess.id || selectedProcess.name)
+      body.append("document", file, file.name)
+      body.append("documentName", file.name)
+      body.append("documentType", "supporting")
+      body.append("processId", selectedProcess.process_id || selectedProcess.name)
       body.append("submittedBy", currentUser.name)
       body.append("fieldKey", fieldKey)
-      files.forEach((file) => body.append("files", file, file.name))
 
-      const response = await fetch("/api/uploads", { method: "POST", body })
+      const response = await fetch("/api/upload", { method: "POST", body })
       if (!response.ok) {
+        failedUploads += 1
         continue
       }
       const data = await response.json()
-      if (Array.isArray(data.urls) && data.urls.length > 0) {
-        uploads[fieldKey] = data.urls
+      const url = data.url || (Array.isArray(data.urls) ? data.urls[0] : null)
+      if (url) {
+        uploads[fieldKey] = url
       }
+    }
+
+    if (failedUploads > 0) {
+      toast({
+        title: "Some uploads failed",
+        description: `${failedUploads} attachment${failedUploads === 1 ? "" : "s"} could not be uploaded.`,
+        variant: "destructive",
+      })
     }
 
     return uploads
@@ -160,11 +258,11 @@ export default function PortalPage() {
       ...attachmentUrls,
     }
     const newRequest: Request = {
-      id: `req-${Date.now()}`,
-      processId: selectedProcess.processId || selectedProcess.id || selectedProcess.name,
-      processName: selectedProcess.name,
-      submittedBy: currentUser.name,
-      submittedAt: now,
+      request_id: `req-${Date.now()}`,
+      process_id: selectedProcess.process_id || selectedProcess.name,
+      process_name: selectedProcess.name,
+      submitted_by: currentUser.name,
+      submitted_at: now,
       status: "Pending",
       data: requestData,
     }
@@ -173,14 +271,25 @@ export default function PortalPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        processId: newRequest.processId,
-        processName: newRequest.processName,
-        submittedBy: newRequest.submittedBy,
+        process_id: newRequest.process_id,
+        process_name: newRequest.process_name,
+        submitted_by: newRequest.submitted_by,
         data: newRequest.data,
       }),
     })
     if (response.ok) {
+      toast({
+        title: "Request submitted",
+        description: "Your request has been sent for review.",
+      })
       await fetchRequests(currentUser.name)
+    } else {
+      const errorText = await response.text()
+      toast({
+        title: "Submission failed",
+        description: errorText || "Please try again.",
+        variant: "destructive",
+      })
     }
     setSubmitted(true)
     setTimeout(() => {
@@ -301,38 +410,38 @@ export default function PortalPage() {
                         className="space-y-4"
                       >
                         {getProcessFields(selectedProcess).map((field) => (
-                          <div key={field.fieldId || field.key} className="space-y-2">
-                            <Label htmlFor={field.fieldId || field.key}>{field.label}</Label>
+                          <div key={field.field_id || field.key} className="space-y-2">
+                            <Label htmlFor={field.field_id || field.key}>{field.label}</Label>
                             {field.type === "file" ? (
                               <Input
-                                id={field.fieldId || field.key}
+                                id={field.field_id || field.key}
                                 type="file"
                                 accept={field.accept}
-                                multiple={field.multiple}
+                                multiple={false}
                                 onChange={(e) => {
-                                  const files = e.target.files ? Array.from(e.target.files) : []
+                                  const file = e.target.files?.[0] || null
                                   setFileUploads({
                                     ...fileUploads,
-                                    [field.fieldId || field.key || ""]: files,
+                                    [field.field_id || field.key || ""]: file,
                                   })
                                 }}
                                 className="bg-input"
                               />
                             ) : field.type === "textarea" ? (
                               <Textarea
-                                id={field.fieldId || field.key}
+                                id={field.field_id || field.key}
                                 placeholder={field.placeholder}
-                                value={formData[field.fieldId || field.key || ""] || ""}
+                                value={formData[field.field_id || field.key || ""] || ""}
                                 onChange={(e) =>
-                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: e.target.value })
+                                  setFormData({ ...formData, [field.field_id || field.key || ""]: e.target.value })
                                 }
                                 className="bg-input"
                               />
                             ) : field.type === "select" && field.options ? (
                               <Select
-                                value={formData[field.fieldId || field.key || ""] || ""}
+                                value={formData[field.field_id || field.key || ""] || ""}
                                 onValueChange={(value) =>
-                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: value })
+                                  setFormData({ ...formData, [field.field_id || field.key || ""]: value })
                                 }
                               >
                                 <SelectTrigger className="bg-input">
@@ -348,12 +457,12 @@ export default function PortalPage() {
                               </Select>
                             ) : (
                               <Input
-                                id={field.fieldId || field.key}
+                                id={field.field_id || field.key}
                                 type={field.type}
                                 placeholder={field.placeholder}
-                                value={formData[field.fieldId || field.key || ""] || ""}
+                                value={formData[field.field_id || field.key || ""] || ""}
                                 onChange={(e) =>
-                                  setFormData({ ...formData, [field.fieldId || field.key || ""]: e.target.value })
+                                  setFormData({ ...formData, [field.field_id || field.key || ""]: e.target.value })
                                 }
                                 className="bg-input"
                               />
@@ -390,16 +499,16 @@ export default function PortalPage() {
                   <div className="space-y-3">
                     {myRequests.map((request) => (
                       <div
-                        key={request.id}
+                        key={request.request_id}
                         className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/50 cursor-pointer hover:bg-secondary/70 transition-colors"
                         onClick={() => setViewingRequest(request)}
                       >
                         <div className="flex items-center gap-3">
                           {getStatusIcon(request.status)}
                           <div>
-                            <p className="font-medium">{request.processName}</p>
+                            <p className="font-medium">{request.process_name}</p>
                             <p className="text-xs text-muted-foreground">
-                              Submitted {new Date(request.submittedAt).toLocaleDateString()}
+                              Submitted {new Date(request.submitted_at).toLocaleDateString()}
                             </p>
                           </div>
                         </div>
@@ -430,11 +539,11 @@ export default function PortalPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
-              {viewingRequest?.processName}
+              {viewingRequest?.process_name}
             </DialogTitle>
             <DialogDescription>
-              Request {viewingRequest?.id} · Submitted on{" "}
-              {viewingRequest && new Date(viewingRequest.submittedAt).toLocaleDateString()}
+              Request {viewingRequest?.request_id} · Submitted on{" "}
+              {viewingRequest && new Date(viewingRequest.submitted_at).toLocaleDateString()}
             </DialogDescription>
           </DialogHeader>
 
@@ -446,10 +555,10 @@ export default function PortalPage() {
                   {getStatusIcon(viewingRequest.status)}
                   <span className="font-medium">{viewingRequest.status}</span>
                 </div>
-                {viewingRequest.decidedBy && viewingRequest.decidedAt && (
+                {viewingRequest.decided_by && viewingRequest.decided_at && (
                   <div className="text-sm text-muted-foreground flex items-center gap-1">
                     <UserCheck className="h-3 w-3" />
-                    {viewingRequest.decidedBy} · {new Date(viewingRequest.decidedAt).toLocaleDateString()}
+                    {viewingRequest.decided_by} · {new Date(viewingRequest.decided_at).toLocaleDateString()}
                   </div>
                 )}
               </div>
@@ -464,12 +573,12 @@ export default function PortalPage() {
                 </div>
               )}
 
-              {viewingRequest.auditLogUrl && (
+              {viewingRequest.audit_log_url && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold">Audit Log</h4>
                     <a
-                      href={viewingRequest.auditLogUrl}
+                      href={viewingRequest.audit_log_url}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs text-primary hover:underline"

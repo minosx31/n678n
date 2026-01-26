@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useGlobalState } from "@/context/global-state"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Shield, User, UserCheck, Workflow } from "lucide-react"
 
 const roleConfig = {
@@ -23,6 +24,7 @@ export default function LandingPage() {
   const router = useRouter()
   const { currentUser, setCurrentUser } = useGlobalState()
   const [users, setUsers] = useState<UserRecord[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   const usersByRole = useMemo(() => {
     return users.reduce(
@@ -52,12 +54,16 @@ export default function LandingPage() {
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void (async () => {
-        const response = await fetch("/api/users")
-        if (!response.ok) {
-          return
+        try {
+          const response = await fetch("/api/users")
+          if (!response.ok) {
+            return
+          }
+          const data = await response.json()
+          setUsers(data.users || [])
+        } finally {
+          setIsLoading(false)
         }
-        const data = await response.json()
-        setUsers(data.users || [])
       })()
     }, 0)
 
@@ -70,6 +76,23 @@ export default function LandingPage() {
 
   if (currentUser) {
     return null
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-lg space-y-6">
+          <div className="text-center space-y-3">
+            <Skeleton className="h-10 w-40 mx-auto" />
+            <Skeleton className="h-4 w-72 mx-auto" />
+          </div>
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      </div>
+    )
   }
 
   return (

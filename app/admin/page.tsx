@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useGlobalState, type Process, type FormField, type RiskDefinition } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
+import { useToast } from "@/hooks/use-toast"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -52,14 +53,16 @@ const FIELD_TYPES = ["text", "number", "textarea", "select", "email", "array", "
 export default function AdminPage() {
   const router = useRouter()
   const { currentUser, processes, addProcess, updateProcess, deleteProcess } = useGlobalState()
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("create")
-  const configApiUrl = process.env.NEXT_PUBLIC_CONFIG_API_URL
+  const processServiceUrl = process.env.NEXT_PUBLIC_PROCESS_SERVICE_URL
   
   // Create process state
   const [input, setInput] = useState("")
   const [referenceName, setReferenceName] = useState<string | null>(null)
   const [referenceText, setReferenceText] = useState<string>("")
   const [isReadingReference, setIsReadingReference] = useState(false)
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedProcess, setGeneratedProcess] = useState<Process | null>(null)
   const [generatedFields, setGeneratedFields] = useState<FormField[]>([])
@@ -90,9 +93,9 @@ export default function AdminPage() {
     return null
   }
 
-  const getProcessKey = (process: Process) => process.processId || process.id || process.name
-  const getProcessFields = (process: Process) => process.formDefinition?.fields ?? process.fields ?? []
-  const getProcessRisks = (process: Process) => process.riskDefinitions ?? []
+  const getProcessKey = (process: Process) => process.process_id || process.name
+  const getProcessFields = (process: Process) => process.form_definition?.fields ?? []
+  const getProcessRisks = (process: Process) => process.risk_definitions ?? []
 
   const handleGenerate = async () => {
     setIsGenerating(true)
@@ -115,9 +118,18 @@ export default function AdminPage() {
       const data = await response.json()
       setGeneratedProcess(data.process)
       setGeneratedFields(getProcessFields(data.process))
-      setGeneratedRisks(data.process.riskDefinitions || [])
+      setGeneratedRisks(data.process.risk_definitions || [])
+      toast({
+        title: "Process generated",
+        description: "Review the draft before saving.",
+      })
     } catch (error) {
       console.error("Error generating process:", error)
+      toast({
+        title: "Generation failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -155,39 +167,58 @@ export default function AdminPage() {
     if (!file) {
       setReferenceName(null)
       setReferenceText("")
+      setReferenceUrl(null)
       return
     }
 
     setIsReadingReference(true)
     setReferenceName(file.name)
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : ""
-      setReferenceText(result)
+
+    const uploadReference = async () => {
+      const body = new FormData()
+      body.append("document", file, file.name)
+      body.append("documentName", file.name)
+      body.append("documentType", "reference")
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body,
+      })
+
+      if (!response.ok) {
+        setReferenceText("")
+        setReferenceUrl(null)
+        setIsReadingReference(false)
+        return
+      }
+
+      const data = await response.json()
+      setReferenceText(data.text || data.content || "")
+      setReferenceUrl(data.url || null)
       setIsReadingReference(false)
     }
-    reader.onerror = () => {
-      setReferenceText("")
-      setIsReadingReference(false)
-    }
-    reader.readAsText(file)
+
+    void uploadReference()
   }
 
   const handleSave = async () => {
     if (generatedProcess) {
       const updatedProcess: Process = {
         ...generatedProcess,
-        formDefinition: {
-          title: generatedProcess.formDefinition?.title || generatedProcess.name,
-          description: generatedProcess.formDefinition?.description || generatedProcess.description,
+        form_definition: {
+          title: generatedProcess.form_definition?.title || generatedProcess.name,
+          description: generatedProcess.form_definition?.description || generatedProcess.description,
           fields: generatedFields,
         },
-        riskDefinitions: generatedRisks,
-        fields: generatedFields,
+        risk_definitions: generatedRisks,
       }
-      if (configApiUrl) {
+      if (referenceName && !referenceUrl) {
+        return
+      }
+
+      if (processServiceUrl) {
         try {
-          await fetch(configApiUrl, {
+          await fetch(processServiceUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -196,15 +227,25 @@ export default function AdminPage() {
                 ? {
                     name: referenceName,
                     content: referenceText,
+                    url: referenceUrl,
                   }
                 : null,
             }),
           })
         } catch (error) {
-          console.error("Failed to save process to config API:", error)
+          console.error("Failed to save process to process service:", error)
+          toast({
+            title: "Save failed",
+            description: "Unable to save to the process service.",
+            variant: "destructive",
+          })
         }
       }
       addProcess(updatedProcess)
+      toast({
+        title: "Process saved",
+        description: "The process is now available.",
+      })
       setSaved(true)
       setTimeout(() => {
         setActiveTab("manage")
@@ -228,8 +269,8 @@ export default function AdminPage() {
 
   const handleSaveEdit = () => {
     if (editingProcess) {
-      const updatedFormDefinition = editingProcess.formDefinition
-        ? { ...editingProcess.formDefinition, fields: editForm.fields }
+      const updatedFormDefinition = editingProcess.form_definition
+        ? { ...editingProcess.form_definition, fields: editForm.fields }
         : {
             title: editForm.name,
             description: editForm.description,
@@ -239,9 +280,8 @@ export default function AdminPage() {
         ...editingProcess,
         name: editForm.name,
         description: editForm.description,
-        formDefinition: updatedFormDefinition,
-        fields: editForm.fields,
-        riskDefinitions: editForm.risks,
+        form_definition: updatedFormDefinition,
+        risk_definitions: editForm.risks,
       })
       setEditingProcess(null)
     }
@@ -253,7 +293,7 @@ export default function AdminPage() {
 
   const confirmDelete = () => {
     if (deletingProcess) {
-      deleteProcess(deletingProcess.processId || deletingProcess.id || deletingProcess.name)
+      deleteProcess(deletingProcess.process_id || deletingProcess.name)
       setDeletingProcess(null)
     }
   }
@@ -261,7 +301,7 @@ export default function AdminPage() {
   // Field editing helpers
   const addField = () => {
     const newField: FormField = {
-      fieldId: `field${Date.now()}`,
+      field_id: `field_${Date.now()}`,
       key: `field_${Date.now()}`,
       label: "New Field",
       type: "text",
@@ -280,9 +320,9 @@ export default function AdminPage() {
         .split(/\s+/)
         .filter(Boolean)
       const fieldId = normalized
-        .map((word, i) => (i === 0 ? word.toLowerCase() : word[0]?.toUpperCase() + word.slice(1).toLowerCase()))
-        .join("")
-      newFields[index].fieldId = fieldId || newFields[index].fieldId
+        .map((word) => word.toLowerCase())
+        .join("_")
+      newFields[index].field_id = fieldId || newFields[index].field_id
       newFields[index].key = updates.label.toLowerCase().replace(/\s+/g, "_")
     }
     setEditForm({ ...editForm, fields: newFields })
@@ -307,8 +347,8 @@ export default function AdminPage() {
       risks: [
         ...prev.risks,
         {
-          riskId: `RISK-${Date.now()}`,
-          riskDefinition: "Describe how this risk is calculated",
+          risk_id: `risk_${Date.now()}`,
+          risk_definition: "Describe how this risk is calculated",
           thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
           description: "",
         },
@@ -342,7 +382,7 @@ export default function AdminPage() {
   // Generated review editing helpers
   const addGeneratedField = () => {
     const newField: FormField = {
-      fieldId: `field${Date.now()}`,
+      field_id: `field_${Date.now()}`,
       key: `field_${Date.now()}`,
       label: "New Field",
       type: "text",
@@ -362,10 +402,8 @@ export default function AdminPage() {
           .replace(/[^a-zA-Z0-9 ]/g, "")
           .split(/\s+/)
           .filter(Boolean)
-        const fieldId = normalized
-          .map((word, i) => (i === 0 ? word.toLowerCase() : word[0]?.toUpperCase() + word.slice(1).toLowerCase()))
-          .join("")
-        newFields[index].fieldId = fieldId || newFields[index].fieldId
+        const fieldId = normalized.map((word) => word.toLowerCase()).join("_")
+        newFields[index].field_id = fieldId || newFields[index].field_id
         newFields[index].key = updates.label.toLowerCase().replace(/\s+/g, "_")
       }
       return newFields
@@ -380,8 +418,8 @@ export default function AdminPage() {
     setGeneratedRisks((prev) => [
       ...prev,
       {
-        riskId: `RISK-${Date.now()}`,
-        riskDefinition: "Describe how this risk is calculated",
+        risk_id: `risk_${Date.now()}`,
+        risk_definition: "Describe how this risk is calculated",
         thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
         description: "",
       },
@@ -426,9 +464,9 @@ export default function AdminPage() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-2xl font-bold mb-1">AI Process Builder</h1>
+              <h1 className="text-2xl font-bold mb-1">Process Builder</h1>
               <p className="text-muted-foreground text-sm">
-                Create and manage approval workflows with AI assistance
+                Build and create processes with AI assistance
               </p>
             </div>
             <TabsList className="bg-secondary">
@@ -498,6 +536,7 @@ export default function AdminPage() {
                     id="reference-file"
                     type="file"
                     accept=".txt,.md,.json,.csv,.pdf"
+                    multiple={false}
                     onChange={(e) => handleReferenceUpload(e.target.files?.[0] || null)}
                   />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -591,7 +630,7 @@ export default function AdminPage() {
                         </div>
                         <div className="space-y-3">
                           {generatedFields.map((field, index) => (
-                            <div key={field.fieldId || field.key} className="p-3 rounded-lg border border-border bg-input/60">
+                            <div key={field.field_id || field.key} className="p-3 rounded-lg border border-border bg-input/60">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs text-muted-foreground">Field {index + 1}</span>
                                 <Button
@@ -678,9 +717,9 @@ export default function AdminPage() {
                                   <div className="space-y-1">
                                     <Label className="text-xs">Item Type</Label>
                                     <Select
-                                      value={field.itemType || "text"}
+                                      value={field.item_type || "text"}
                                       onValueChange={(value) =>
-                                        updateGeneratedField(index, { itemType: value as FormField["itemType"] })
+                                        updateGeneratedField(index, { item_type: value as FormField["item_type"] })
                                       }
                                     >
                                       <SelectTrigger className="h-8 text-sm">
@@ -721,7 +760,7 @@ export default function AdminPage() {
                         </div>
                         <div className="space-y-3">
                           {generatedRisks.map((risk, index) => (
-                            <div key={risk.riskId} className="p-3 rounded-lg border border-border bg-input/60">
+                            <div key={risk.risk_id} className="p-3 rounded-lg border border-border bg-input/60">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs text-muted-foreground">Risk {index + 1}</span>
                                 <Button
@@ -737,16 +776,16 @@ export default function AdminPage() {
                                 <div className="space-y-1">
                                   <Label className="text-xs">Risk ID</Label>
                                   <Input
-                                    value={risk.riskId}
-                                    onChange={(e) => updateGeneratedRisk(index, { riskId: e.target.value })}
+                                    value={risk.risk_id}
+                                    onChange={(e) => updateGeneratedRisk(index, { risk_id: e.target.value })}
                                     className="h-8 text-sm"
                                   />
                                 </div>
                                 <div className="space-y-1">
                                   <Label className="text-xs">Risk Definition</Label>
                                   <Textarea
-                                    value={risk.riskDefinition}
-                                    onChange={(e) => updateGeneratedRisk(index, { riskDefinition: e.target.value })}
+                                    value={risk.risk_definition}
+                                    onChange={(e) => updateGeneratedRisk(index, { risk_definition: e.target.value })}
                                     className="min-h-[70px] text-sm"
                                   />
                                 </div>
@@ -932,7 +971,7 @@ export default function AdminPage() {
                 </h4>
                 <div className="space-y-2">
                   {getProcessFields(viewingProcess).map((field) => (
-                    <div key={field.fieldId || field.key} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                    <div key={field.field_id || field.key} className="flex items-center justify-between p-2 rounded bg-secondary/50">
                       <div>
                         <span className="text-sm font-medium">{field.label}</span>
                         {field.placeholder && <p className="text-xs text-muted-foreground">{field.placeholder}</p>}
@@ -956,12 +995,12 @@ export default function AdminPage() {
                 </h4>
                 <div className="space-y-2">
                   {getProcessRisks(viewingProcess).map((risk, index) => (
-                    <div key={risk.riskId} className="p-3 rounded bg-secondary/50">
+                    <div key={risk.risk_id} className="p-3 rounded bg-secondary/50">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{risk.riskId}</span>
+                        <span className="text-sm font-medium">{risk.risk_id}</span>
                         <span className="text-xs text-muted-foreground">Risk {index + 1}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">{risk.riskDefinition}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{risk.risk_definition}</p>
                       <div className="text-xs text-muted-foreground mt-2">
                         Thresholds: low {risk.thresholds.low}, medium {risk.thresholds.medium}, high {risk.thresholds.high}
                       </div>
@@ -1138,7 +1177,7 @@ export default function AdminPage() {
               </div>
               <div className="space-y-3">
                 {editForm.risks.map((risk, index) => (
-                  <div key={risk.riskId} className="p-3 rounded-lg border border-border bg-secondary/30">
+                  <div key={risk.risk_id} className="p-3 rounded-lg border border-border bg-secondary/30">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-medium">
                         {index + 1}
@@ -1157,16 +1196,16 @@ export default function AdminPage() {
                       <div className="space-y-1">
                         <Label className="text-xs">Risk ID</Label>
                         <Input
-                          value={risk.riskId}
-                          onChange={(e) => updateEditRisk(index, { riskId: e.target.value })}
+                          value={risk.risk_id}
+                          onChange={(e) => updateEditRisk(index, { risk_id: e.target.value })}
                           className="h-8 text-sm"
                         />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Risk Definition</Label>
                         <Textarea
-                          value={risk.riskDefinition}
-                          onChange={(e) => updateEditRisk(index, { riskDefinition: e.target.value })}
+                          value={risk.risk_definition}
+                          onChange={(e) => updateEditRisk(index, { risk_definition: e.target.value })}
                           className="min-h-[70px] text-sm"
                         />
                       </div>

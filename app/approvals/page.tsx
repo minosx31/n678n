@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useGlobalState, type Request } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
+import { useToast } from "@/hooks/use-toast"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -36,7 +38,9 @@ import {
 export default function ApprovalsPage() {
   const router = useRouter()
   const { currentUser } = useGlobalState()
+  const { toast } = useToast()
   const [requests, setRequests] = useState<Request[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   
   // Confirmation modal state
   const [confirmingRequest, setConfirmingRequest] = useState<Request | null>(null)
@@ -50,13 +54,21 @@ export default function ApprovalsPage() {
   const [auditLogLoading, setAuditLogLoading] = useState(false)
 
   const fetchRequests = useCallback(async () => {
-    const response = await fetch("/api/requests")
-    if (!response.ok) {
-      return
+    try {
+      const response = await fetch("/api/requests")
+      if (!response.ok) {
+        throw new Error("Failed to load approvals")
+      }
+      const data = await response.json()
+      setRequests(data.requests || [])
+    } catch (error) {
+      toast({
+        title: "Unable to load approvals",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
     }
-    const data = await response.json()
-    setRequests(data.requests || [])
-  }, [])
+  }, [toast])
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "approver") {
@@ -65,14 +77,20 @@ export default function ApprovalsPage() {
     }
 
     const timeoutId = window.setTimeout(() => {
-      void fetchRequests()
+      void (async () => {
+        try {
+          await fetchRequests()
+        } finally {
+          setIsLoading(false)
+        }
+      })()
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
   }, [currentUser, router, fetchRequests])
 
   useEffect(() => {
-    const auditUrl = viewingRequest?.auditLogUrl
+    const auditUrl = viewingRequest?.audit_log_url
     if (!auditUrl) {
       setAuditLogData(null)
       setAuditLogError(null)
@@ -99,10 +117,28 @@ export default function ApprovalsPage() {
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
-  }, [viewingRequest?.auditLogUrl])
+  }, [viewingRequest?.audit_log_url])
 
   if (!currentUser || currentUser.role !== "approver") {
     return null
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <AppHeader title="Approvals" />
+        <main className="p-6 max-w-6xl mx-auto space-y-6">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-[420px] w-full" />
+        </main>
+      </div>
+    )
   }
 
   const pendingRequests = requests.filter((r) => r.status === "Pending")
@@ -123,18 +159,29 @@ export default function ApprovalsPage() {
   const handleConfirm = async () => {
     if (!confirmingRequest || !confirmAction) return
 
-    const response = await fetch(`/api/requests/${confirmingRequest.id}`, {
+    const response = await fetch(`/api/requests/${confirmingRequest.request_id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         status: confirmAction,
         remarks: remarks.trim() || undefined,
-        decidedBy: currentUser.name,
+        decided_by: currentUser.name,
       }),
     })
 
     if (response.ok) {
+      toast({
+        title: `Request ${confirmAction.toLowerCase()}`,
+        description: "The decision has been recorded.",
+      })
       await fetchRequests()
+    } else {
+      const errorText = await response.text()
+      toast({
+        title: "Decision failed",
+        description: errorText || "Please try again.",
+        variant: "destructive",
+      })
     }
 
     setConfirmingRequest(null)
@@ -157,6 +204,13 @@ export default function ApprovalsPage() {
       case "Human":
         return <User className="h-4 w-4 text-primary" />
     }
+  }
+
+  const formatDate = (value?: string) => {
+    if (!value) return "N/A"
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return value
+    return parsed.toLocaleDateString()
   }
 
   const getDisplayStatus = (status: string) => (status === "Human" ? "Needs Review" : status)
@@ -191,7 +245,7 @@ export default function ApprovalsPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{humanRequests.length}</p>
-                  <p className="text-sm text-muted-foreground">Human Review</p>
+                  <p className="text-sm text-muted-foreground">Manual Decision</p>
                 </div>
               </div>
             </CardContent>
@@ -255,7 +309,7 @@ export default function ApprovalsPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <User className="h-5 w-5 text-primary" />
-                  Human Decisions
+                   Manual Decision Required
                 </CardTitle>
                 <CardDescription>These requests require a manual decision.</CardDescription>
               </CardHeader>
@@ -263,21 +317,21 @@ export default function ApprovalsPage() {
                 {humanRequests.length > 0 ? (
                   <div className="space-y-4">
                     {humanRequests.map((request) => (
-                      <div key={request.id} className="p-4 rounded-lg border border-border bg-secondary/50">
+                      <div key={request.request_id} className="p-4 rounded-lg border border-border bg-secondary/50">
                         <div className="flex items-start justify-between mb-4">
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               <FileText className="h-4 w-4 text-primary" />
-                              <h3 className="font-semibold">{request.processName}</h3>
+                              <h3 className="font-semibold">{request.process_name}</h3>
                             </div>
                             <div className="flex items-center gap-4 text-sm text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {request.submittedBy}
+                                {request.submitted_by}
                               </span>
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
-                                {new Date(request.submittedAt).toLocaleDateString()}
+                                {formatDate(request.submitted_at)}
                               </span>
                             </div>
                           </div>
@@ -291,7 +345,7 @@ export default function ApprovalsPage() {
                               <Eye className="h-4 w-4" />
                             </Button>
                             <Badge variant="secondary" className="text-xs">
-                              {request.id}
+                              {request.request_id}
                             </Badge>
                           </div>
                         </div>
@@ -355,21 +409,21 @@ export default function ApprovalsPage() {
                 {pendingRequests.length > 0 ? (
                   <div className="space-y-4">
                     {pendingRequests.map((request) => (
-                      <div key={request.id} className="p-4 rounded-lg border border-border bg-secondary/50">
+                      <div key={request.request_id} className="p-4 rounded-lg border border-border bg-secondary/50">
                         <div className="flex items-start justify-between mb-4">
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               <FileText className="h-4 w-4 text-primary" />
-                              <h3 className="font-semibold">{request.processName}</h3>
+                              <h3 className="font-semibold">{request.process_name}</h3>
                             </div>
                             <div className="flex items-center gap-4 text-sm text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {request.submittedBy}
+                                {request.submitted_by}
                               </span>
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
-                                {new Date(request.submittedAt).toLocaleDateString()}
+                                {formatDate(request.submitted_at)}
                               </span>
                             </div>
                           </div>
@@ -383,7 +437,7 @@ export default function ApprovalsPage() {
                               <Eye className="h-4 w-4" />
                             </Button>
                             <Badge variant="secondary" className="text-xs">
-                              {request.id}
+                              {request.request_id}
                             </Badge>
                           </div>
                         </div>
@@ -447,16 +501,16 @@ export default function ApprovalsPage() {
                   <div className="space-y-3">
                     {requests.map((request) => (
                       <div
-                        key={request.id}
+                        key={request.request_id}
                         className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"
                         onClick={() => handleViewRequest(request)}
                       >
                         <div className="flex items-center gap-3">
                           {getStatusIcon(request.status)}
                           <div>
-                            <p className="font-medium text-sm">{request.processName}</p>
+                            <p className="font-medium text-sm">{request.process_name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {request.submittedBy} · {new Date(request.submittedAt).toLocaleDateString()}
+                              {request.submitted_by} · {formatDate(request.submitted_at)}
                             </p>
                             {request.remarks && (
                               <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
@@ -521,11 +575,11 @@ export default function ApprovalsPage() {
               <div className="p-3 rounded-lg bg-secondary/50">
                 <div className="flex items-center gap-2 mb-1">
                   <FileText className="h-4 w-4 text-primary" />
-                  <span className="font-medium">{confirmingRequest.processName}</span>
+                  <span className="font-medium">{confirmingRequest.process_name}</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Submitted by {confirmingRequest.submittedBy} on{" "}
-                  {new Date(confirmingRequest.submittedAt).toLocaleDateString()}
+                  Submitted by {confirmingRequest.submitted_by} on{" "}
+                  {formatDate(confirmingRequest.submitted_at)}
                 </p>
               </div>
 
@@ -586,10 +640,10 @@ export default function ApprovalsPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
-              {viewingRequest?.processName}
+              {viewingRequest?.process_name}
             </DialogTitle>
             <DialogDescription>
-              Request {viewingRequest?.id} · Submitted by {viewingRequest?.submittedBy}
+              Request {viewingRequest?.request_id} · Submitted by {viewingRequest?.submitted_by}
             </DialogDescription>
           </DialogHeader>
 
@@ -616,10 +670,10 @@ export default function ApprovalsPage() {
                   {getStatusIcon(viewingRequest.status)}
                   <span className="font-medium">{getDisplayStatus(viewingRequest.status)}</span>
                 </div>
-                {viewingRequest.decidedBy && (
+                {viewingRequest.decided_by && (
                   <div className="text-sm text-muted-foreground flex items-center gap-1">
                     <UserCheck className="h-3 w-3" />
-                    {viewingRequest.decidedBy}
+                    {viewingRequest.decided_by}
                   </div>
                 )}
               </div>
@@ -634,12 +688,12 @@ export default function ApprovalsPage() {
                 </div>
               )}
 
-              {viewingRequest.auditLogUrl && (
+              {viewingRequest.audit_log_url && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold">Audit Log</h4>
                     <a
-                      href={viewingRequest.auditLogUrl}
+                      href={viewingRequest.audit_log_url}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs text-primary hover:underline"

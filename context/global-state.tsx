@@ -5,19 +5,21 @@ import { createContext, useContext, useState, type ReactNode } from "react"
 export type UserRole = "admin" | "employee" | "approver" | null
 
 export interface User {
+  id?: string
   name: string
+  email?: string
   role: UserRole
 }
 
 export interface FormField {
-  fieldId: string
+  field_id: string
   key?: string
   label: string
   type: "text" | "number" | "textarea" | "select" | "email" | "array" | "file"
   required?: boolean
   placeholder?: string
   options?: string[]
-  itemType?: "text" | "number" | "email" | "select"
+  item_type?: "text" | "number" | "email" | "select"
   multiple?: boolean
   accept?: string
   validation?: {
@@ -34,49 +36,56 @@ export interface WorkflowStep {
 }
 
 export interface FormDefinition {
+  form_definition_id?: string
+  process_id?: string
   title: string
   description?: string
   fields: FormField[]
+  version?: string
+  created_at?: string
 }
 
 export interface PolicyDefinition {
-  policyId: string
-  policyText: string
+  policy_id?: string
+  process_id?: string
+  policy_text: string
   type: "business-rule"
   severity: "high" | "medium" | "low"
+  version?: string
+  created_at?: string
 }
 
 export interface RiskDefinition {
-  riskId: string
-  riskDefinition: string
+  risk_id?: string
+  process_id?: string
+  risk_definition: string
   thresholds: {
     low: number
     medium: number
     high: number
   }
   description?: string
+  version?: string
+  created_at?: string
 }
 
 export interface AgentConfig {
-  allowHumanOverride: boolean
-  defaultDecision: "H" | "A" | "R"
-  confidenceThreshold: number
+  allow_human_override: boolean
+  default_decision: "H" | "A" | "R"
+  confidence_threshold: number
 }
 
 export interface Process {
-  processId: string
-  createdAt: string
+  process_id: string
+  created_at: string
+  created_by?: string
   name: string
   description: string
   version: string
-  formDefinition: FormDefinition
-  policies: PolicyDefinition[]
-  riskDefinitions: RiskDefinition[]
-  agentConfig: AgentConfig
-  // Legacy compatibility
-  id?: string
-  fields?: FormField[]
-  steps?: WorkflowStep[]
+  form_definition?: FormDefinition
+  policies?: PolicyDefinition[]
+  risk_definitions?: RiskDefinition[]
+  agent_config?: AgentConfig
 }
 
 export interface TimelineEvent {
@@ -90,17 +99,18 @@ export interface TimelineEvent {
 }
 
 export interface Request {
-  id: string
-  processId: string
-  processName: string
-  submittedBy: string
-  submittedAt: string
+  request_id: string
+  dbId?: string
+  process_id: string
+  process_name: string
+  submitted_by: string
+  submitted_at: string
   status: "Pending" | "Approved" | "Rejected" | "Human"
   data: Record<string, string | number | string[]>
   remarks?: string
-  decidedBy?: string
-  decidedAt?: string
-  auditLogUrl?: string
+  decided_by?: string
+  decided_at?: string
+  audit_log_url?: string
   timeline?: TimelineEvent[]
 }
 
@@ -120,17 +130,22 @@ const GlobalStateContext = createContext<GlobalState | undefined>(undefined)
 
 const initialProcesses: Process[] = [
   {
-    processId: "laptop-request",
-    createdAt: "2026-01-10T09:00:00Z",
+    process_id: "laptop-request",
+    created_at: "2026-01-10T09:00:00Z",
+    created_by: "system",
     name: "Laptop Request",
     description: "Request a new laptop or laptop upgrade for your work needs.",
     version: "v1.0",
-    formDefinition: {
+    form_definition: {
+      form_definition_id: "form-laptop-request",
+      process_id: "laptop-request",
       title: "Laptop Request",
       description: "Provide details for your laptop request.",
+      version: "v1.0",
+      created_at: "2026-01-10T09:00:00Z",
       fields: [
         {
-          fieldId: "laptopType",
+          field_id: "laptop_type",
           key: "laptop_type",
           label: "Laptop Type",
           type: "select",
@@ -138,7 +153,7 @@ const initialProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "specs",
+          field_id: "specs",
           key: "specs",
           label: "Required Specifications",
           type: "text",
@@ -146,7 +161,7 @@ const initialProcesses: Process[] = [
           required: true,
         },
         {
-          fieldId: "justification",
+          field_id: "justification",
           key: "justification",
           label: "Business Justification",
           type: "textarea",
@@ -157,92 +172,138 @@ const initialProcesses: Process[] = [
     },
     policies: [
       {
-        policyId: "POLICY-BUDGET-001",
-        policyText: "Requests over $1500 require manager approval.",
+        policy_id: "policy-budget-001",
+        process_id: "laptop-request",
+        policy_text: "Requests over $1500 require manager approval.",
         type: "business-rule",
         severity: "high",
+        version: "v1.0",
+        created_at: "2026-01-10T09:00:00Z",
       },
     ],
-    riskDefinitions: [
+    risk_definitions: [
       {
-        riskId: "RISK-COST-001",
-        riskDefinition: "Risk increases when cost exceeds budget thresholds.",
+        risk_id: "risk-cost-001",
+        process_id: "laptop-request",
+        risk_definition: "Risk increases when cost exceeds budget thresholds.",
         thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
         description: "Cost-based risk assessment for hardware requests.",
+        version: "v1.0",
+        created_at: "2026-01-10T09:00:00Z",
       },
     ],
-    agentConfig: {
-      allowHumanOverride: true,
-      defaultDecision: "H",
-      confidenceThreshold: 0.9,
+    agent_config: {
+      allow_human_override: true,
+      default_decision: "H",
+      confidence_threshold: 0.9,
     },
-    // Legacy compatibility
-    id: "laptop-request",
-    fields: [
-      { fieldId: "laptopType", key: "laptop_type", label: "Laptop Type", type: "select", options: ["MacBook Pro", "Dell XPS", "ThinkPad X1"] },
-      { fieldId: "specs", key: "specs", label: "Required Specifications", type: "text", placeholder: "e.g., 16GB RAM, 512GB SSD" },
+  },
+  {
+    process_id: "leave-approval",
+    created_at: "2026-01-12T11:00:00Z",
+    created_by: "system",
+    name: "Leave Approval",
+    description: "Request time off and route for approval.",
+    version: "v1.0",
+    form_definition: {
+      form_definition_id: "form-leave-approval",
+      process_id: "leave-approval",
+      title: "Leave Request",
+      description: "Provide details for your leave request.",
+      version: "v1.0",
+      created_at: "2026-01-12T11:00:00Z",
+      fields: [
+        {
+          field_id: "leave_type",
+          key: "leave_type",
+          label: "Leave Type",
+          type: "select",
+          options: ["Annual Leave", "Sick Leave", "Unpaid Leave", "Bereavement"],
+          required: true,
+        },
+        {
+          field_id: "start_date",
+          key: "start_date",
+          label: "Start Date",
+          type: "text",
+          placeholder: "YYYY-MM-DD",
+          required: true,
+        },
+        {
+          field_id: "end_date",
+          key: "end_date",
+          label: "End Date",
+          type: "text",
+          placeholder: "YYYY-MM-DD",
+          required: true,
+        },
+        {
+          field_id: "reason",
+          key: "reason",
+          label: "Reason",
+          type: "textarea",
+          placeholder: "Provide a brief justification",
+          required: true,
+        },
+        {
+          field_id: "supporting_document",
+          key: "supporting_document",
+          label: "Supporting Document",
+          type: "file",
+          required: false,
+        },
+      ],
+    },
+    policies: [
       {
-        fieldId: "justification",
-        key: "justification",
-        label: "Business Justification",
-        type: "textarea",
-        placeholder: "Explain why you need this laptop...",
+        policy_id: "policy-leave-001",
+        process_id: "leave-approval",
+        policy_text: "Leave requests exceeding 10 business days require senior approval.",
+        type: "business-rule",
+        severity: "medium",
+        version: "v1.0",
+        created_at: "2026-01-12T11:00:00Z",
       },
     ],
-    steps: [
-      { name: "IT Review", action: "check_inventory" },
-      { name: "Manager Approval", condition: "cost > 1500" },
+    risk_definitions: [
+      {
+        risk_id: "risk-coverage-001",
+        process_id: "leave-approval",
+        risk_definition: "Risk increases when team coverage falls below 60%.",
+        thresholds: { low: 0.3, medium: 0.6, high: 1.0 },
+        description: "Coverage-based risk assessment for leave.",
+        version: "v1.0",
+        created_at: "2026-01-12T11:00:00Z",
+      },
     ],
+    agent_config: {
+      allow_human_override: true,
+      default_decision: "H",
+      confidence_threshold: 0.85,
+    },
   },
 ]
 
 const initialRequests: Request[] = [
   {
-    id: "req-001",
-    processId: "laptop-request",
-    processName: "Laptop Request",
-    submittedBy: "John Doe",
-    submittedAt: "2026-01-14T10:30:00Z",
+    request_id: "req-001",
+    process_id: "laptop-request",
+    process_name: "Laptop Request",
+    submitted_by: "John Doe",
+    submitted_at: "2026-01-14T10:30:00Z",
     status: "Pending",
     data: {
       laptop_type: "MacBook Pro",
       specs: "16GB RAM, 1TB SSD",
       justification: "Need a powerful machine for video editing and development work.",
     },
-    timeline: [
-      {
-        id: "evt-001",
-        timestamp: "2026-01-14T10:30:00Z",
-        type: "submitted",
-        title: "Request Submitted",
-        description: "Request was submitted for processing",
-        actor: "John Doe",
-        status: "completed",
-      },
-      {
-        id: "evt-002",
-        timestamp: "2026-01-14T10:30:05Z",
-        type: "auto_check",
-        title: "Inventory Check",
-        description: "Checking available inventory for MacBook Pro",
-        status: "completed",
-      },
-      {
-        id: "evt-003",
-        timestamp: "2026-01-14T10:30:10Z",
-        type: "pending_approval",
-        title: "Pending Manager Approval",
-        description: "Cost exceeds $1500, requires manager approval",
-        status: "current",
-      },
-    ],
   },
   {
-    id: "req-002",
-    processId: "laptop-request",
-    processName: "Laptop Request",
-    submittedBy: "Jane Smith",
-    submittedAt: "2026-01-12T14:15:00Z",
+    request_id: "req-002",
+    process_id: "laptop-request",
+    process_name: "Laptop Request",
+    submitted_by: "Jane Smith",
+    submitted_at: "2026-01-12T14:15:00Z",
     status: "Approved",
     data: {
       laptop_type: "Dell XPS",
@@ -250,36 +311,8 @@ const initialRequests: Request[] = [
       justification: "Replacement for damaged laptop.",
     },
     remarks: "Approved - replacement is justified",
-    decidedBy: "Mike Manager",
-    decidedAt: "2026-01-12T16:30:00Z",
-    timeline: [
-      {
-        id: "evt-004",
-        timestamp: "2026-01-12T14:15:00Z",
-        type: "submitted",
-        title: "Request Submitted",
-        description: "Request was submitted for processing",
-        actor: "Jane Smith",
-        status: "completed",
-      },
-      {
-        id: "evt-005",
-        timestamp: "2026-01-12T14:15:05Z",
-        type: "auto_check",
-        title: "Inventory Check",
-        description: "Dell XPS available in stock",
-        status: "completed",
-      },
-      {
-        id: "evt-006",
-        timestamp: "2026-01-12T16:30:00Z",
-        type: "approved",
-        title: "Request Approved",
-        description: "Approved - replacement is justified",
-        actor: "Mike Manager",
-        status: "completed",
-      },
-    ],
+    decided_by: "Mike Manager",
+    decided_at: "2026-01-12T16:30:00Z",
   },
 ]
 
@@ -293,14 +326,14 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
   }
 
   const updateProcess = (process: Process) => {
-    const targetId = process.processId || process.id
+    const targetId = process.process_id
     setProcesses((prev) =>
-      prev.map((p) => (p.processId === targetId || p.id === targetId ? process : p))
+      prev.map((p) => (p.process_id === targetId ? process : p))
     )
   }
 
   const deleteProcess = (id: string) => {
-    setProcesses((prev) => prev.filter((p) => p.processId !== id && p.id !== id))
+    setProcesses((prev) => prev.filter((p) => p.process_id !== id))
   }
 
   const addRequest = (request: Request) => {
@@ -309,7 +342,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
 
   const updateRequestStatus = (id: string, status: "Approved" | "Rejected" | "Human", remarks?: string, decidedBy?: string) => {
     setRequests((prev) => prev.map((req) => {
-      if (req.id !== id) return req
+      if (req.request_id !== id) return req
       
       const now = new Date().toISOString()
       const newEvent: TimelineEvent = {
@@ -333,8 +366,8 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
         ...req,
         status,
         remarks,
-        decidedBy,
-        decidedAt: now,
+        decided_by: decidedBy,
+        decided_at: now,
         timeline: updatedTimeline.length > 0 ? [...updatedTimeline, newEvent] : [newEvent],
       }
     }))
