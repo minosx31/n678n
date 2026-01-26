@@ -3,27 +3,38 @@ import { getSupabaseServerClient } from "@/lib/supabase/server"
 
 export interface ApprovalDecisionPayload {
   requestId: string
-  status: string
-  remarks?: string
-  decidedBy?: string
-  decidedAt?: string
-  auditLogUrl?: string
+  decisionPayload: {
+    decision?: {
+      code?: "A" | "R" | "H" | string
+    }
+    remarks?: string
+  }
+  auditUrl?: string
 }
 
-const allowedStatuses = ["Approved", "Rejected", "Human"]
+const decisionCodeMap: Record<string, string> = {
+  A: "Approved",
+  R: "Rejected",
+  H: "Human",
+}
+const allowedStatuses = Object.values(decisionCodeMap)
 
 export async function POST(request: NextRequest) {
   try {
     const body: ApprovalDecisionPayload = await request.json()
 
-    if (!body.requestId || !body.status) {
+    const decisionCode = body.decisionPayload?.decision?.code
+    const status = decisionCode ? decisionCodeMap[decisionCode] : undefined
+    const remarks = body.decisionPayload?.remarks
+
+    if (!body.requestId || !decisionCode || !status) {
       return NextResponse.json(
-        { error: "Missing required fields: requestId, status" },
+        { error: "Missing required fields: requestId, decisionPayload.decision.code" },
         { status: 400 }
       )
     }
 
-    if (!allowedStatuses.includes(body.status)) {
+    if (!allowedStatuses.includes(status)) {
       return NextResponse.json(
         { error: `Invalid status. Allowed: ${allowedStatuses.join(", ")}` },
         { status: 400 }
@@ -31,18 +42,18 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseServerClient()
-    const decidedAt = body.decidedAt || new Date().toISOString()
+    const decidedAt = new Date().toISOString()
     const { data, error } = await supabase
       .from("requests")
       .update({
-        status: body.status,
-        remarks: body.remarks || null,
-        decided_by: body.decidedBy || "System",
+        status,
+        remarks: remarks || null,
+        decided_by: "System",
         decided_at: decidedAt,
-        audit_log_url: body.auditLogUrl || null,
+        audit_log_url: body.auditUrl || null,
       })
-      .eq("request_code", body.requestId)
-      .select("request_code")
+      .eq("request_id", body.requestId)
+      .select("request_id")
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -57,11 +68,11 @@ export async function POST(request: NextRequest) {
       message: "Decision received",
       decision: {
         requestId: body.requestId,
-        status: body.status,
-        remarks: body.remarks || null,
-        decidedBy: body.decidedBy || "System",
+        status,
+        remarks: remarks || null,
+        decidedBy: "System",
         decidedAt,
-        auditLogUrl: body.auditLogUrl || null,
+        auditLogUrl: body.auditUrl || null,
       },
     })
 
