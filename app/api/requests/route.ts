@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
           requestId: newRequest.request_id,
           processId: newRequest.process_id,
           webhookUrl: approvalCallbackUrl,
-          submittedBy: newRequest.submitted_by,
+          submittedBy: body.submitted_by,
           submittedAt: submittedAt,
         },
         formData: newRequest.data,

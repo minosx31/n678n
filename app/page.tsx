@@ -133,7 +133,7 @@ export default function LandingPage() {
               className="w-full flex items-center justify-start gap-4 p-2 rounded-md border border-input hover:bg-success/10 hover:border-success bg-transparent transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-                <User className="h-5 w-5 text-accent" />
+                <User className="h-5 w-5 text-foreground" />
               </div>
               <div className="text-left">
                 <div className="font-semibold">Login as Requester</div>

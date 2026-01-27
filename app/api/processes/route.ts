@@ -145,32 +145,85 @@ const fallbackProcesses: Process[] = [
 export async function GET() {
   try {
     const supabase = getSupabaseServerClient()
+    
+    // Fetch processes with related data from separate tables
     const { data, error } = await supabase
       .from("processes")
-      .select("process_id,created_at,name,description,version,form_definition,policies,risk_definitions,agent_config")
+      .select(`
+        process_id,
+        created_at,
+        created_by,
+        name,
+        description,
+        version,
+        form_definitions (
+          form_definition_id,
+          title,
+          description,
+          fields,
+          version,
+          created_at
+        ),
+        policies (
+          policy_id,
+          policy_text,
+          severity,
+          type,
+          version,
+          created_at
+        ),
+        risk_definitions (
+          risk_id,
+          risk_definition,
+          thresholds,
+          version,
+          created_at
+        )
+      `)
       .order("created_at", { ascending: false })
 
     if (error) {
+      console.error("Supabase fetch error:", error.message, error.details, error.hint)
       return NextResponse.json({ processes: fallbackProcesses, total: fallbackProcesses.length })
     }
 
-    const processes = (data || []).map((row) => ({
-      process_id: row.process_id,
-      created_at: row.created_at,
-      name: row.name,
-      description: row.description,
-      version: row.version,
-      form_definition: row.form_definition,
-      policies: row.policies,
-      risk_definitions: row.risk_definitions,
-      agent_config: row.agent_config,
-    })) as Process[]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const processes = (data || []).map((row: any) => {
+      // Get the first form definition (or construct one from the array)
+      const formDefs = row.form_definitions || []
+      const formDefinition = formDefs.length > 0 ? {
+        form_definition_id: formDefs[0].form_definition_id,
+        title: formDefs[0].title,
+        description: formDefs[0].description,
+        fields: formDefs[0].fields || [],
+        version: formDefs[0].version,
+        created_at: formDefs[0].created_at,
+      } : undefined
+      
+      return {
+        process_id: row.process_id,
+        created_at: row.created_at,
+        created_by: row.created_by,
+        name: row.name,
+        description: row.description,
+        version: row.version,
+        form_definition: formDefinition,
+        policies: row.policies || [],
+        risk_definitions: row.risk_definitions || [],
+        agent_config: {
+          allow_human_override: true,
+          default_decision: "H" as const,
+          confidence_threshold: 0.9,
+        },
+      }
+    }) as Process[]
 
     return NextResponse.json({
       processes: processes.length > 0 ? processes : fallbackProcesses,
       total: processes.length > 0 ? processes.length : fallbackProcesses.length,
     })
   } catch (error) {
+    console.error("Error fetching processes:", error)
     return NextResponse.json({ processes: fallbackProcesses, total: fallbackProcesses.length })
   }
 }
@@ -180,37 +233,103 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    if (!body.name || !body.form_definition || !body.policies || !body.agent_config) {
+    if (!body.name) {
       return NextResponse.json(
-        { error: "Missing required fields: name, form_definition, policies, agent_config" },
+        { error: "Missing required field: name" },
         { status: 400 }
       )
     }
 
     const supabase = getSupabaseServerClient()
-    const processId = body.process_id || `process-${Date.now()}`
+    const processId = body.process_id || crypto.randomUUID()
     const now = new Date().toISOString()
 
-    const { data, error } = await supabase
+    // 1. Insert into processes table
+    const { error: processError } = await supabase
       .from("processes")
       .insert({
         process_id: processId,
         created_at: body.created_at || now,
+        created_by: body.created_by || "admin",
         name: body.name,
         description: body.description || "",
         version: body.version || "v1.0",
-        form_definition: body.form_definition,
-        policies: body.policies,
-        risk_definitions: body.risk_definitions || [],
-        agent_config: body.agent_config,
       })
-      .select()
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (processError) {
+      console.error("Error inserting process:", processError)
+      return NextResponse.json({ error: processError.message }, { status: 500 })
     }
 
-    return NextResponse.json({ process: data?.[0] }, { status: 201 })
+    // 2. Insert form definition if provided
+    if (body.form_definition) {
+      const { error: formError } = await supabase
+        .from("form_definitions")
+        .insert({
+          form_definition_id: crypto.randomUUID(),
+          process_id: processId,
+          title: body.form_definition.title || body.name,
+          description: body.form_definition.description || body.description || "",
+          fields: body.form_definition.fields || [],
+          version: body.form_definition.version || "1.0",
+          created_at: now,
+        })
+
+      if (formError) {
+        console.error("Error inserting form_definition:", formError)
+      }
+    }
+
+    // 3. Insert policies if provided
+    if (body.policies && Array.isArray(body.policies)) {
+      for (const policy of body.policies) {
+        const { error: policyError } = await supabase
+          .from("policies")
+          .insert({
+            policy_id: crypto.randomUUID(),
+            process_id: processId,
+            policy_text: policy.policy_text,
+            severity: policy.severity || "medium",
+            type: policy.type || "business-rule",
+            version: policy.version || "1.0",
+            created_at: now,
+          })
+
+        if (policyError) {
+          console.error("Error inserting policy:", policyError)
+        }
+      }
+    }
+
+    // 4. Insert risk definitions if provided
+    if (body.risk_definitions && Array.isArray(body.risk_definitions)) {
+      for (const risk of body.risk_definitions) {
+        const { error: riskError } = await supabase
+          .from("risk_definitions")
+          .insert({
+            risk_id: crypto.randomUUID(),
+            process_id: processId,
+            risk_definition: risk.risk_definition,
+            thresholds: risk.thresholds || { low: 0.3, medium: 0.6, high: 1.0 },
+            version: risk.version || "1.0",
+            created_at: now,
+          })
+
+        if (riskError) {
+          console.error("Error inserting risk_definition:", riskError)
+        }
+      }
+    }
+
+    return NextResponse.json({ 
+      process: { 
+        process_id: processId,
+        name: body.name,
+        description: body.description,
+        version: body.version || "v1.0",
+        created_at: now,
+      } 
+    }, { status: 201 })
   } catch (error) {
     console.error("Error creating process:", error)
     return NextResponse.json(

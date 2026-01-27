@@ -33,6 +33,7 @@ import {
   MessageSquare,
   Eye,
   UserCheck,
+  Loader2,
 } from "lucide-react"
 
 export default function ApprovalsPage() {
@@ -46,6 +47,7 @@ export default function ApprovalsPage() {
   const [confirmingRequest, setConfirmingRequest] = useState<Request | null>(null)
   const [confirmAction, setConfirmAction] = useState<"Approved" | "Rejected" | null>(null)
   const [remarks, setRemarks] = useState("")
+  const [isDeciding, setIsDeciding] = useState(false)
   
   // View request details
   const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
@@ -159,34 +161,39 @@ export default function ApprovalsPage() {
   const handleConfirm = async () => {
     if (!confirmingRequest || !confirmAction) return
 
-    const response = await fetch(`/api/requests/${confirmingRequest.request_id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: confirmAction,
-        remarks: remarks.trim() || undefined,
-        decided_by: currentUser.name,
-      }),
-    })
+    setIsDeciding(true)
 
-    if (response.ok) {
-      toast({
-        title: `Request ${confirmAction.toLowerCase()}`,
-        description: "The decision has been recorded.",
+    try {
+      const response = await fetch(`/api/requests/${confirmingRequest.request_id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: confirmAction,
+          remarks: remarks.trim() || undefined,
+          decided_by: currentUser.name,
+        }),
       })
-      await fetchRequests()
-    } else {
-      const errorText = await response.text()
-      toast({
-        title: "Decision failed",
-        description: errorText || "Please try again.",
-        variant: "destructive",
-      })
+
+      if (response.ok) {
+        toast({
+          title: `Request ${confirmAction.toLowerCase()}`,
+          description: "The decision has been recorded.",
+        })
+        await fetchRequests()
+      } else {
+        const errorText = await response.text()
+        toast({
+          title: "Decision failed",
+          description: errorText || "Please try again.",
+          variant: "destructive",
+        })
+      }
+    } finally {
+      setIsDeciding(false)
+      setConfirmingRequest(null)
+      setConfirmAction(null)
+      setRemarks("")
     }
-
-    setConfirmingRequest(null)
-    setConfirmAction(null)
-    setRemarks("")
   }
 
   const handleViewRequest = (request: Request) => {
@@ -233,7 +240,7 @@ export default function ApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppHeader title="Approvals" />
+      <AppHeader title="Approval Page" />
 
       <main className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="grid gap-4 md:grid-cols-4">
@@ -606,6 +613,7 @@ export default function ApprovalsPage() {
           <DialogFooter>
             <Button
               variant="outline"
+              disabled={isDeciding}
               onClick={() => {
                 setConfirmingRequest(null)
                 setConfirmAction(null)
@@ -616,9 +624,15 @@ export default function ApprovalsPage() {
             </Button>
             <Button
               onClick={handleConfirm}
+              disabled={isDeciding}
               variant={confirmAction === "Approved" ? "default" : "destructive"}
             >
-              {confirmAction === "Approved" ? (
+              {isDeciding ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : confirmAction === "Approved" ? (
                 <>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                   Confirm Approval

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { useGlobalState, type Process, type Request } from "@/context/global-state"
+import { useGlobalState, type Process, type Request, type FormField } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -33,6 +33,7 @@ import {
   MessageSquare,
   UserCheck,
   Eye,
+  Loader2,
 } from "lucide-react"
 
 export default function PortalPage() {
@@ -45,6 +46,7 @@ export default function PortalPage() {
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
   const [fileUploads, setFileUploads] = useState<Record<string, File | null>>({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [viewingRequest, setViewingRequest] = useState<Request | null>(null)
   const [auditLogData, setAuditLogData] = useState<string | null>(null)
@@ -54,7 +56,39 @@ export default function PortalPage() {
   const hasInitializedStatuses = useRef(false)
 
   const getProcessKey = (process: Process) => process.process_id || process.name
-  const getProcessFields = (process: Process) => process.form_definition?.fields ?? []
+
+  // Normalize fields from API response (handles both camelCase and snake_case, and form_definitions array)
+  const getProcessFields = (process: Process): FormField[] => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = process as any
+    // Handle both form_definition (object) and form_definitions (array)
+    const formDef = p.form_definition || p.formDefinition || p.form_definitions?.[0]
+    const fields = formDef?.fields ?? []
+    return fields.map((f: Record<string, unknown>) => ({
+      field_id: f.field_id || f.fieldId || f.id || f.key,
+      key: f.key || f.field_id || f.fieldId || f.id,
+      label: f.label,
+      type: f.type,
+      placeholder: f.placeholder,
+      required: f.required,
+      options: Array.isArray(f.options)
+        ? f.options
+            .map((option: unknown) => {
+              if (typeof option === "string") return option
+              if (option && typeof option === "object") {
+                const obj = option as { label?: unknown; value?: unknown }
+                return String(obj.value ?? obj.label ?? "")
+              }
+              return ""
+            })
+            .filter(Boolean)
+        : undefined,
+      item_type: f.item_type || f.itemType,
+      multiple: f.multiple,
+      accept: f.accept,
+      validation: f.validation,
+    }))
+  }
 
   const fetchProcesses = useCallback(async () => {
     try {
@@ -135,18 +169,6 @@ export default function PortalPage() {
   }, [currentUser, router, fetchProcesses, fetchRequests])
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== "employee") {
-      return
-    }
-
-    const intervalId = window.setInterval(() => {
-      void fetchRequests(currentUser.name)
-    }, 15000)
-
-    return () => window.clearInterval(intervalId)
-  }, [currentUser, fetchRequests])
-
-  useEffect(() => {
     const auditUrl = viewingRequest?.audit_log_url
     if (!auditUrl) {
       setAuditLogData(null)
@@ -193,7 +215,7 @@ export default function PortalPage() {
             </div>
             <div className="space-y-4">
               <Skeleton className="h-10 w-56" />
-              <Skeleton className="h-[360px] w-full" />
+              <Skeleton className="h-90 w-full" />
             </div>
           </div>
         </main>
@@ -207,7 +229,7 @@ export default function PortalPage() {
     if (!selectedProcess) return {}
 
     const uploads: Record<string, string> = {}
-    const fileFields = getProcessFields(selectedProcess).filter((field) => field.type === "file")
+    const fileFields = getProcessFields(selectedProcess).filter((field: FormField) => field.type === "file")
     let failedUploads = 0
 
     for (const field of fileFields) {
@@ -237,20 +259,13 @@ export default function PortalPage() {
       }
     }
 
-    if (failedUploads > 0) {
-      toast({
-        title: "Some uploads failed",
-        description: `${failedUploads} attachment${failedUploads === 1 ? "" : "s"} could not be uploaded.`,
-        variant: "destructive",
-      })
-    }
-
     return uploads
   }
 
   const handleSubmit = async () => {
     if (!selectedProcess) return
 
+    setIsSubmitting(true)
     const now = new Date().toISOString()
     const attachmentUrls = await uploadAttachments()
     const requestData = {
@@ -267,37 +282,41 @@ export default function PortalPage() {
       data: requestData,
     }
 
-    const response = await fetch("/api/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        process_id: newRequest.process_id,
-        process_name: newRequest.process_name,
-        submitted_by: newRequest.submitted_by,
-        data: newRequest.data,
-      }),
-    })
-    if (response.ok) {
-      toast({
-        title: "Request submitted",
-        description: "Your request has been sent for review.",
+    try {
+      const response = await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          process_id: newRequest.process_id,
+          process_name: newRequest.process_name,
+          submitted_by: newRequest.submitted_by,
+          data: newRequest.data,
+        }),
       })
-      await fetchRequests(currentUser.name)
-    } else {
-      const errorText = await response.text()
-      toast({
-        title: "Submission failed",
-        description: errorText || "Please try again.",
-        variant: "destructive",
-      })
+      if (response.ok) {
+        toast({
+          title: "Request submitted",
+          description: "Your request has been sent for review.",
+        })
+        await fetchRequests(currentUser.name)
+      } else {
+        const errorText = await response.text()
+        toast({
+          title: "Submission failed",
+          description: errorText || "Please try again.",
+          variant: "destructive",
+        })
+      }
+      setSubmitted(true)
+      setTimeout(() => {
+        setSubmitted(false)
+        setSelectedProcess(null)
+        setFormData({})
+        setFileUploads({})
+      }, 2000)
+    } finally {
+      setIsSubmitting(false)
     }
-    setSubmitted(true)
-    setTimeout(() => {
-      setSubmitted(false)
-      setSelectedProcess(null)
-      setFormData({})
-      setFileUploads({})
-    }, 2000)
   }
 
   const getStatusIcon = (status: string) => {
@@ -329,7 +348,7 @@ export default function PortalPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppHeader title="Employee Portal" />
+      <AppHeader title="User Portal" />
 
       <main className="p-6 max-w-6xl mx-auto">
         <Tabs defaultValue="submit" className="space-y-6">
@@ -409,7 +428,7 @@ export default function PortalPage() {
                         }}
                         className="space-y-4"
                       >
-                        {getProcessFields(selectedProcess).map((field) => (
+                        {getProcessFields(selectedProcess).map((field: FormField) => (
                           <div key={field.field_id || field.key} className="space-y-2">
                             <Label htmlFor={field.field_id || field.key}>{field.label}</Label>
                             {field.type === "file" ? (
@@ -448,8 +467,8 @@ export default function PortalPage() {
                                   <SelectValue placeholder={`Select ${field.label}`} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {field.options.map((option) => (
-                                    <SelectItem key={option} value={option}>
+                                  {field.options.map((option: string, index: number) => (
+                                    <SelectItem key={`${option}-${index}`} value={option}>
                                       {option}
                                     </SelectItem>
                                   ))}
@@ -469,9 +488,18 @@ export default function PortalPage() {
                             )}
                           </div>
                         ))}
-                        <Button type="submit" className="w-full mt-6">
-                          <Send className="mr-2 h-4 w-4" />
-                          Submit Request
+                        <Button type="submit" className="w-full mt-6" disabled={isSubmitting}>
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Submitting...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="mr-2 h-4 w-4" />
+                              Submit Request
+                            </>
+                          )}
                         </Button>
                       </form>
                     )
@@ -592,7 +620,7 @@ export default function PortalPage() {
                       <p className="text-destructive">{auditLogError}</p>
                     )}
                     {!auditLogLoading && !auditLogError && auditLogData && (
-                      <pre className="whitespace-pre-wrap break-words">{auditLogData}</pre>
+                      <pre className="whitespace-pre-wrap wrap-break-word">{auditLogData}</pre>
                     )}
                     {!auditLogLoading && !auditLogError && !auditLogData && (
                       <p className="text-muted-foreground">No audit log data available.</p>

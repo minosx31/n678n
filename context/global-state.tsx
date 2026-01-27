@@ -119,6 +119,7 @@ interface GlobalState {
   processes: Process[]
   requests: Request[]
   setCurrentUser: (user: User | null) => void
+  setProcesses: (processes: Process[]) => void
   addProcess: (process: Process) => void
   updateProcess: (process: Process) => void
   deleteProcess: (id: string) => void
@@ -380,6 +381,7 @@ export function GlobalStateProvider({ children }: { children: ReactNode }) {
         processes,
         requests,
         setCurrentUser,
+        setProcesses,
         addProcess,
         updateProcess,
         deleteProcess,

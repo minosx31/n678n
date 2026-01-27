@@ -52,10 +52,11 @@ import {
 const FIELD_TYPES = ["text", "number", "textarea", "select", "email", "array", "file"] as const
 export default function AdminPage() {
   const router = useRouter()
-  const { currentUser, processes, addProcess, updateProcess, deleteProcess } = useGlobalState()
+  const { currentUser, processes, setProcesses, addProcess, updateProcess, deleteProcess } = useGlobalState()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("create")
-  const processServiceUrl = process.env.NEXT_PUBLIC_PROCESS_SERVICE_URL
+  const [isLoadingProcesses, setIsLoadingProcesses] = useState(true)
+  const [isSavingProcess, setIsSavingProcess] = useState(false)
   
   // Create process state
   const [input, setInput] = useState("")
@@ -89,13 +90,74 @@ export default function AdminPage() {
     }
   }, [currentUser, router])
 
+  // Fetch processes from Supabase on mount
+  useEffect(() => {
+    let isCancelled = false
+    
+    const fetchProcesses = async () => {
+      try {
+        const response = await fetch("/api/processes")
+        if (response.ok && !isCancelled) {
+          const data = await response.json()
+          if (data.processes && Array.isArray(data.processes)) {
+            setProcesses(data.processes)
+          }
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error("Failed to fetch processes:", error)
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingProcesses(false)
+        }
+      }
+    }
+
+    fetchProcesses()
+    
+    return () => {
+      isCancelled = true
+    }
+  }, [setProcesses])
+
   if (!currentUser || currentUser.role !== "admin") {
     return null
   }
 
   const getProcessKey = (process: Process) => process.process_id || process.name
-  const getProcessFields = (process: Process) => process.form_definition?.fields ?? []
-  const getProcessRisks = (process: Process) => process.risk_definitions ?? []
+
+  // Normalize fields from API response (handles both camelCase and snake_case)
+  const getProcessFields = (process: Process): FormField[] => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = process as any
+    const formDef = p.form_definition || p.formDefinition
+    const fields = formDef?.fields ?? []
+    return fields.map((f: Record<string, unknown>) => ({
+      field_id: f.field_id || f.fieldId || f.key,
+      key: f.key || f.field_id || f.fieldId,
+      label: f.label,
+      type: f.type,
+      placeholder: f.placeholder,
+      required: f.required,
+      options: f.options,
+      item_type: f.item_type || f.itemType,
+      validation: f.validation,
+    })) as FormField[]
+  }
+
+  // Normalize risks from API response (handles both camelCase and snake_case)
+  const getProcessRisks = (process: Process): RiskDefinition[] => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = process as any
+    const risks = p.risk_definitions || p.riskDefinitions || []
+    return risks.map((r: Record<string, unknown>) => ({
+      risk_id: r.risk_id || r.riskId || `risk_${Date.now()}`,
+      risk_definition: r.risk_definition || r.riskDefinition || "",
+      thresholds: r.thresholds || { low: 0.3, medium: 0.6, high: 1.0 },
+      description: r.description,
+    })) as RiskDefinition[]
+  }
 
   const handleGenerate = async () => {
     setIsGenerating(true)
@@ -116,9 +178,28 @@ export default function AdminPage() {
       }
 
       const data = await response.json()
-      setGeneratedProcess(data.process)
-      setGeneratedFields(getProcessFields(data.process))
-      setGeneratedRisks(data.process.risk_definitions || [])
+      const proc = data.process
+      
+      // Normalize the process object to use snake_case internally
+      const normalizedProcess: Process = {
+        process_id: proc.process_id || proc.processId || `PROC-${Date.now()}`,
+        created_at: proc.created_at || proc.createdAt || new Date().toISOString(),
+        name: proc.name,
+        description: proc.description,
+        version: proc.version || "v1.0",
+        form_definition: {
+          title: proc.form_definition?.title || proc.formDefinition?.title || proc.name,
+          description: proc.form_definition?.description || proc.formDefinition?.description || proc.description,
+          fields: [],
+        },
+        risk_definitions: [],
+        policies: proc.policies || [],
+        agent_config: proc.agent_config || proc.agentConfig,
+      }
+      
+      setGeneratedProcess(normalizedProcess)
+      setGeneratedFields(getProcessFields(proc))
+      setGeneratedRisks(getProcessRisks(proc))
       toast({
         title: "Process generated",
         description: "Review the draft before saving.",
@@ -178,7 +259,6 @@ export default function AdminPage() {
       const body = new FormData()
       body.append("document", file, file.name)
       body.append("documentName", file.name)
-      body.append("documentType", "reference")
 
       const response = await fetch("/api/upload", {
         method: "POST",
@@ -203,45 +283,99 @@ export default function AdminPage() {
 
   const handleSave = async () => {
     if (generatedProcess) {
-      const updatedProcess: Process = {
-        ...generatedProcess,
+      setIsSavingProcess(true)
+      // Generate a valid UUID for process_id
+      const processId = crypto.randomUUID()
+      
+      // Transform to expected API format
+      const requestBody = {
+        process_id: processId,
+        name: generatedProcess.name,
+        description: generatedProcess.description,
+        version: "1.0",
+        created_at: new Date().toISOString(),
+        created_by: currentUser?.name || "admin",
+        policies: (generatedProcess.policies || []).map((p) => ({
+          policy_text: p.policy_text,
+          severity: p.severity || "medium",
+          type: p.type || "business-rule",
+          version: "1.0",
+        })),
+        risk_definitions: generatedRisks.map((r) => ({
+          risk_definition: r.risk_definition,
+          thresholds: r.thresholds,
+          version: "1.0",
+        })),
+        reference_documents: referenceName
+          ? [
+              {
+                name: referenceName,
+                type: referenceName.split(".").pop() || "unknown",
+                version: "1.0",
+                access_url: referenceUrl || "",
+              },
+            ]
+          : [],
+        form_definitions: [
+          {
+            title: generatedProcess.form_definition?.title || generatedProcess.name,
+            description: generatedProcess.form_definition?.description || generatedProcess.description,
+            fields: generatedFields.map((f) => ({
+              id: f.field_id || f.key,
+              type: f.type,
+              label: f.label,
+              ...(f.options && { options: f.options }),
+              ...(f.placeholder && { placeholder: f.placeholder }),
+              ...(f.required !== undefined && { required: f.required }),
+              ...(f.validation && { validation: f.validation }),
+            })),
+            version: "1.0",
+          },
+        ],
+      }
+
+      try {
+        const response = await fetch("/api/processes/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "Failed to save process")
+        }
+
+      } catch (error) {
+        console.error("Failed to save process to process service:", error)
+        toast({
+          title: "Save failed",
+          description: error instanceof Error ? error.message : "Unable to save to the process service.",
+          variant: "destructive",
+        })
+        return
+      } finally {
+        setIsSavingProcess(false)
+      }
+
+      // Create Process object for local state
+      const savedProcess: Process = {
+        process_id: processId,
+        created_at: new Date().toISOString(),
+        name: generatedProcess.name,
+        description: generatedProcess.description,
+        version: "1.0",
         form_definition: {
           title: generatedProcess.form_definition?.title || generatedProcess.name,
           description: generatedProcess.form_definition?.description || generatedProcess.description,
           fields: generatedFields,
         },
         risk_definitions: generatedRisks,
-      }
-      if (referenceName && !referenceUrl) {
-        return
+        policies: generatedProcess.policies || [],
+        agent_config: generatedProcess.agent_config,
       }
 
-      if (processServiceUrl) {
-        try {
-          await fetch(processServiceUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              process: updatedProcess,
-              referenceDocument: referenceName
-                ? {
-                    name: referenceName,
-                    content: referenceText,
-                    url: referenceUrl,
-                  }
-                : null,
-            }),
-          })
-        } catch (error) {
-          console.error("Failed to save process to process service:", error)
-          toast({
-            title: "Save failed",
-            description: "Unable to save to the process service.",
-            variant: "destructive",
-          })
-        }
-      }
-      addProcess(updatedProcess)
+      addProcess(savedProcess)
       toast({
         title: "Process saved",
         description: "The process is now available.",
@@ -458,7 +592,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppHeader title="Process Builder" />
+      <AppHeader title="Process Builder Page" />
 
       <main className="p-6 max-w-5xl mx-auto">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -535,7 +669,7 @@ export default function AdminPage() {
                   <Input
                     id="reference-file"
                     type="file"
-                    accept=".txt,.md,.json,.csv,.pdf"
+                    accept=".txt,.md,.json,.csv,.pdf,.doc,.docx"
                     multiple={false}
                     onChange={(e) => handleReferenceUpload(e.target.files?.[0] || null)}
                   />
@@ -545,7 +679,7 @@ export default function AdminPage() {
                         ? "Reading file..."
                         : referenceName
                           ? `Attached: ${referenceName}`
-                          : "Attach a policy, checklist, or template to guide the LLM"}
+                          : "Attach a reference document for agent to make a decision"}
                     </span>
                     {referenceName && (
                       <Button
@@ -581,7 +715,7 @@ export default function AdminPage() {
 
             {/* Step 2: Preview */}
             {generatedProcess && (
-              <Card className="border-border bg-card border-primary/50">
+              <Card className="bg-card border-primary/50">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -839,8 +973,11 @@ export default function AdminPage() {
                     <Separator />
 
                     <Button
-                      onClick={handleSave}
-                      disabled={saved}
+                      type="button"
+                      onClick={() => {
+                        handleSave()
+                      }}
+                      disabled={saved || isSavingProcess}
                       className="w-full"
                       variant={saved ? "outline" : "default"}
                       size="lg"
@@ -849,6 +986,11 @@ export default function AdminPage() {
                         <>
                           <Check className="mr-2 h-4 w-4" />
                           Saved to Processes
+                        </>
+                      ) : isSavingProcess ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving...
                         </>
                       ) : (
                         <>
@@ -881,7 +1023,16 @@ export default function AdminPage() {
 
           {/* MANAGE TAB */}
           <TabsContent value="manage" className="space-y-4">
-            {processes.length === 0 ? (
+            {isLoadingProcesses ? (
+              <Card className="border-border bg-card">
+                <CardContent className="py-12">
+                  <div className="flex flex-col items-center justify-center text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground text-sm">Loading processes...</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : processes.length === 0 ? (
               <Card className="border-border bg-card border-dashed">
                 <CardContent className="py-12">
                   <div className="flex flex-col items-center justify-center text-center">
