@@ -2,7 +2,8 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { GlobalStateProvider } from "@/context/global-state"
-import { Toaster } from "@/components/ui/toaster"
+import { Toaster } from "@/components/ui/sonner"
+import { RealtimeStatusToast } from "@/components/realtime-status-toast"
 import "./globals.css"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
@@ -24,6 +25,7 @@ export default function RootLayout({
         <GlobalStateProvider>
           {children}
           <Toaster />
+          <RealtimeStatusToast />
         </GlobalStateProvider>
       </body>
     </html>

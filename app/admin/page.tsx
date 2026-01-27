@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useGlobalState, type Process, type FormField, type RiskDefinition } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
 import { useToast } from "@/hooks/use-toast"
+import { sampleProcessByLabel } from "@/lib/sample-processes"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -60,6 +61,7 @@ export default function AdminPage() {
   
   // Create process state
   const [input, setInput] = useState("")
+  const [selectedSampleLabel, setSelectedSampleLabel] = useState<string | null>(null)
   const [referenceName, setReferenceName] = useState<string | null>(null)
   const [referenceText, setReferenceText] = useState<string>("")
   const [isReadingReference, setIsReadingReference] = useState(false)
@@ -207,11 +209,25 @@ export default function AdminPage() {
       })
     } catch (error) {
       console.error("Error generating process:", error)
-      toast({
-        title: "Generation failed",
-        description: error instanceof Error ? error.message : "Please try again.",
-        variant: "destructive",
-      })
+      if (selectedSampleLabel && sampleProcessByLabel[selectedSampleLabel]) {
+        const sampleProcess = sampleProcessByLabel[selectedSampleLabel]
+        const normalizedProcess: Process = {
+          ...sampleProcess,
+          form_definition: {
+            title: sampleProcess.form_definition?.title || sampleProcess.name,
+            description: sampleProcess.form_definition?.description || sampleProcess.description,
+            fields: [],
+          },
+          risk_definitions: sampleProcess.risk_definitions || [],
+          policies: sampleProcess.policies || [],
+          agent_config: sampleProcess.agent_config,
+        }
+
+        setGeneratedProcess(normalizedProcess)
+        setGeneratedFields(getProcessFields(sampleProcess))
+        setGeneratedRisks(getProcessRisks(sampleProcess))
+        return
+      }
     } finally {
       setIsGenerating(false)
     }
@@ -291,11 +307,6 @@ export default function AdminPage() {
           setReferenceUrl(uploadedReferenceUrl)
         } catch (error) {
           console.error("Failed to upload reference document:", error)
-          toast({
-            title: "Reference upload failed",
-            description: error instanceof Error ? error.message : "Unable to upload reference document.",
-            variant: "destructive",
-          })
           setIsReadingReference(false)
           setIsSavingProcess(false)
           return
@@ -305,11 +316,6 @@ export default function AdminPage() {
       }
 
       if (referenceName && !uploadedReferenceUrl) {
-        toast({
-          title: "Reference upload missing",
-          description: "Please upload the reference document before saving.",
-          variant: "destructive",
-        })
         setIsSavingProcess(false)
         return
       }
@@ -375,11 +381,6 @@ export default function AdminPage() {
 
       } catch (error) {
         console.error("Failed to save process to process service:", error)
-        toast({
-          title: "Save failed",
-          description: error instanceof Error ? error.message : "Unable to save to the process service.",
-          variant: "destructive",
-        })
         return
       } finally {
         setIsSavingProcess(false)
@@ -670,7 +671,10 @@ export default function AdminPage() {
                   placeholder="Example: 'When someone requests a firewall change, first check if the IP is on our trusted list. If it's not trusted, route to the security team. If the port is sensitive (like 22 or 3389), require manager approval.'"
                   className="min-h-[120px] bg-input resize-none"
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value)
+                    setSelectedSampleLabel(null)
+                  }}
                 />
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">
@@ -683,6 +687,7 @@ export default function AdminPage() {
                     onClick={() => {
                       const randomPrompt = samplePrompts[Math.floor(Math.random() * samplePrompts.length)]
                       setInput(randomPrompt.text)
+                      setSelectedSampleLabel(randomPrompt.label)
                     }}
                   >
                     Use random sample prompt

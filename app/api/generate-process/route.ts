@@ -68,7 +68,7 @@ Structure your response exactly as follows (strictly JSON, no markdown):
 
 async function generateWithGemini(description: string, referenceText?: string): Promise<Record<string, unknown> | null> {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" })
     const trimmedReference = referenceText?.trim()
     const referenceBlock = trimmedReference
       ? `\n\nReference context (user-provided):\n"""\n${trimmedReference.slice(0, 8000)}\n"""`

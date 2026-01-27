@@ -146,6 +146,22 @@ export async function POST(request: NextRequest) {
       data: body.data,
     }
 
+    const { error: insertError } = await supabase
+      .from("requests")
+      .insert({
+        request_id: newRequest.request_id,
+        process_id: newRequest.process_id,
+        process_name: newRequest.process_name,
+        submitted_by: newRequest.submitted_by,
+        submitted_at: newRequest.submitted_at,
+        status: newRequest.status,
+        data: newRequest.data,
+      })
+
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 })
+    }
+
     const handlerResponse = await fetch(handlerEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
