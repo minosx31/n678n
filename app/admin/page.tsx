@@ -64,6 +64,7 @@ export default function AdminPage() {
   const [referenceText, setReferenceText] = useState<string>("")
   const [isReadingReference, setIsReadingReference] = useState(false)
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
+  const [referenceFile, setReferenceFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedProcess, setGeneratedProcess] = useState<Process | null>(null)
   const [generatedFields, setGeneratedFields] = useState<FormField[]>([])
@@ -249,36 +250,12 @@ export default function AdminPage() {
       setReferenceName(null)
       setReferenceText("")
       setReferenceUrl(null)
+      setReferenceFile(null)
       return
     }
 
-    setIsReadingReference(true)
     setReferenceName(file.name)
-
-    const uploadReference = async () => {
-      const body = new FormData()
-      body.append("document", file, file.name)
-      body.append("documentName", file.name)
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body,
-      })
-
-      if (!response.ok) {
-        setReferenceText("")
-        setReferenceUrl(null)
-        setIsReadingReference(false)
-        return
-      }
-
-      const data = await response.json()
-      setReferenceText(data.text || data.content || "")
-      setReferenceUrl(data.document_url || null)
-      setIsReadingReference(false)
-    }
-
-    void uploadReference()
+    setReferenceFile(file)
   }
 
   const handleSave = async () => {
@@ -287,6 +264,56 @@ export default function AdminPage() {
       // Generate a valid UUID for process_id
       const processId = crypto.randomUUID()
       
+      let uploadedReferenceUrl = referenceUrl
+      let uploadedReferenceText = referenceText
+
+      if (referenceFile) {
+        setIsReadingReference(true)
+        try {
+          const body = new FormData()
+          body.append("document", referenceFile, referenceFile.name)
+          body.append("documentName", referenceFile.name)
+
+          const response = await fetch("/api/upload", {
+            method: "POST",
+            body,
+          })
+
+          if (!response.ok) {
+            const errorText = await response.text()
+            throw new Error(errorText || "Failed to upload reference document")
+          }
+
+          const data = await response.json()
+          uploadedReferenceText = data.text || data.content || ""
+          uploadedReferenceUrl = data.document_url || null
+          setReferenceText(uploadedReferenceText)
+          setReferenceUrl(uploadedReferenceUrl)
+        } catch (error) {
+          console.error("Failed to upload reference document:", error)
+          toast({
+            title: "Reference upload failed",
+            description: error instanceof Error ? error.message : "Unable to upload reference document.",
+            variant: "destructive",
+          })
+          setIsReadingReference(false)
+          setIsSavingProcess(false)
+          return
+        } finally {
+          setIsReadingReference(false)
+        }
+      }
+
+      if (referenceName && !uploadedReferenceUrl) {
+        toast({
+          title: "Reference upload missing",
+          description: "Please upload the reference document before saving.",
+          variant: "destructive",
+        })
+        setIsSavingProcess(false)
+        return
+      }
+
       // Transform to expected API format
       const requestBody = {
         process_id: processId,
@@ -312,7 +339,7 @@ export default function AdminPage() {
                 name: referenceName,
                 type: referenceName.split(".").pop() || "unknown",
                 version: "1.0",
-                access_url: referenceUrl || "",
+                access_url: uploadedReferenceUrl || "",
               },
             ]
           : [],
