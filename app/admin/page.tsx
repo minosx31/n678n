@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useGlobalState, type Process, type FormField, type RiskDefinition } from "@/context/global-state"
+import { useGlobalState, type Process, type FormField, type PolicyDefinition, type RiskDefinition } from "@/context/global-state"
 import { AppHeader } from "@/components/app-header"
 import { useToast } from "@/hooks/use-toast"
 import { sampleProcessByLabel } from "@/lib/sample-processes"
@@ -69,6 +69,7 @@ export default function AdminPage() {
   const [referenceFile, setReferenceFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedProcess, setGeneratedProcess] = useState<Process | null>(null)
+  const [generatedPolicies, setGeneratedPolicies] = useState<PolicyDefinition[]>([])
   const [generatedFields, setGeneratedFields] = useState<FormField[]>([])
   const [generatedRisks, setGeneratedRisks] = useState<RiskDefinition[]>([])
   const [saved, setSaved] = useState(false)
@@ -149,6 +150,22 @@ export default function AdminPage() {
     })) as FormField[]
   }
 
+  // Normalize policies from API response or samples (handles camelCase and snake_case)
+  const getProcessPolicies = (process: Process): PolicyDefinition[] => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = process as any
+    const policies = p.policies || p.policyDefinitions || []
+    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return policies.map((policy: any) => ({
+      policy_id: policy.policy_id || policy.policyId || `policy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      policy_text: policy.policy_text || policy.policyText || "Policy text missing",
+      type: policy.type || "business-rule",
+      severity: policy.severity || "medium",
+      version: "1.0"
+    })) as PolicyDefinition[]
+  }
+
   // Normalize risks from API response (handles both camelCase and snake_case)
   const getProcessRisks = (process: Process): RiskDefinition[] => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -167,6 +184,7 @@ export default function AdminPage() {
     setSaved(false)
     setGeneratedProcess(null)
     setGeneratedFields([])
+    setGeneratedPolicies([])
     setGeneratedRisks([])
 
     try {
@@ -196,12 +214,13 @@ export default function AdminPage() {
           fields: [],
         },
         risk_definitions: [],
-        policies: proc.policies || [],
+        policies: [],
         agent_config: proc.agent_config || proc.agentConfig,
       }
       
       setGeneratedProcess(normalizedProcess)
       setGeneratedFields(getProcessFields(proc))
+      setGeneratedPolicies(getProcessPolicies(proc))
       setGeneratedRisks(getProcessRisks(proc))
       toast({
         title: "Process generated",
@@ -225,6 +244,7 @@ export default function AdminPage() {
 
         setGeneratedProcess(normalizedProcess)
         setGeneratedFields(getProcessFields(sampleProcess))
+        setGeneratedPolicies(getProcessPolicies(sampleProcess))
         setGeneratedRisks(getProcessRisks(sampleProcess))
         return
       }
@@ -328,10 +348,10 @@ export default function AdminPage() {
         version: "1.0",
         created_at: new Date().toISOString(),
         created_by: currentUser?.name || "admin",
-        policies: (generatedProcess.policies || []).map((p) => ({
+        policies: (generatedPolicies).map((p) => ({
           policy_text: p.policy_text,
           severity: p.severity || "medium",
-          type: p.type || "business-rule",
+          type: p.type || "Policy Rule",
           version: "1.0",
         })),
         risk_definitions: generatedRisks.map((r) => ({
@@ -399,7 +419,7 @@ export default function AdminPage() {
           fields: generatedFields,
         },
         risk_definitions: generatedRisks,
-        policies: generatedProcess.policies || [],
+        policies: generatedPolicies,
         agent_config: generatedProcess.agent_config,
       }
 
@@ -618,6 +638,30 @@ export default function AdminPage() {
     setGeneratedRisks((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const addGeneratedPolicy = () => {
+    setGeneratedPolicies((prev) => [
+      ...prev,
+      {
+        policy_id: `policy_${Date.now()}`,
+        policy_text: "New policy rule",
+        type: "business-rule",
+        severity: "medium",
+      },
+    ])
+  }
+
+  const updateGeneratedPolicy = (index: number, updates: Partial<PolicyDefinition>) => {
+    setGeneratedPolicies((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], ...updates }
+      return next
+    })
+  }
+
+  const removeGeneratedPolicy = (index: number) => {
+    setGeneratedPolicies((prev) => prev.filter((_, i) => i !== index))
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader title="Process Builder Page" />
@@ -669,7 +713,7 @@ export default function AdminPage() {
               <CardContent className="space-y-4">
                 <Textarea
                   placeholder="Example: 'When someone requests a firewall change, first check if the IP is on our trusted list. If it's not trusted, route to the security team. If the port is sensitive (like 22 or 3389), require manager approval.'"
-                  className="min-h-[120px] bg-input resize-none"
+                  className="min-h-30 bg-input resize-none"
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value)
@@ -779,7 +823,7 @@ export default function AdminPage() {
                       <p className="text-sm text-muted-foreground mt-1">{generatedProcess.description}</p>
                     </div>
 
-                    <div className="grid gap-6 md:grid-cols-2">
+                    <div className="grid gap-6 md:grid-cols-3">
                       {/* Fields */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
@@ -910,6 +954,82 @@ export default function AdminPage() {
                         </div>
                       </div>
 
+                      {generatedPolicies.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-semibold flex items-center gap-2">
+                              Generated Policies
+                              <Badge variant="secondary" className="text-xs">
+                                {generatedPolicies.length}
+                              </Badge>
+                            </h4>
+                            <Button variant="outline" size="sm" onClick={addGeneratedPolicy}>
+                              <Plus className="mr-2 h-3 w-3" />
+                              Add Policy
+                            </Button>
+                          </div>
+                          <div className="space-y-3">
+                            {generatedPolicies.map((policy, index) => (
+                              <div key={index} className="p-3 rounded-lg border border-border bg-input/60">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs text-muted-foreground">Policy {index + 1}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => removeGeneratedPolicy(index)}
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                
+                                <div className="space-y-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Policy Rule</Label>
+                                    <Textarea
+                                      value={policy.policy_text}
+                                      onChange={(e) => updateGeneratedPolicy(index, { policy_text: e.target.value })}
+                                      className="min-h-15 text-sm"
+                                    />
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">Severity</Label>
+                                      <Select
+                                        value={policy.severity}
+                                        onValueChange={(value) => 
+                                          updateGeneratedPolicy(index, { severity: value as PolicyDefinition["severity"] })
+                                        }
+                                      >
+                                        <SelectTrigger className="h-8 text-sm">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="low">Low</SelectItem>
+                                          <SelectItem value="medium">Medium</SelectItem>
+                                          <SelectItem value="high">High</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">Type</Label>
+                                      <Input 
+                                        value={policy.type} 
+                                        disabled 
+                                        className="h-8 text-sm bg-muted/50" 
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                            {generatedPolicies.length === 0 && (
+                              <p className="text-xs text-muted-foreground">No policies generated. Add one manually.</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Risk Definitions */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
@@ -952,7 +1072,7 @@ export default function AdminPage() {
                                   <Textarea
                                     value={risk.risk_definition}
                                     onChange={(e) => updateGeneratedRisk(index, { risk_definition: e.target.value })}
-                                    className="min-h-[70px] text-sm"
+                                    className="min-h-17.5 text-sm"
                                   />
                                 </div>
                                 <div className="grid gap-2 sm:grid-cols-3">
@@ -1154,7 +1274,7 @@ export default function AdminPage() {
                 </h4>
                 <div className="space-y-2">
                   {getProcessFields(viewingProcess).map((field) => (
-                    <div key={field.field_id || field.key} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                    <div key={field.field_id} className="flex items-center justify-between p-2 rounded bg-secondary/50">
                       <div>
                         <span className="text-sm font-medium">{field.label}</span>
                         {field.placeholder && <p className="text-xs text-muted-foreground">{field.placeholder}</p>}
@@ -1169,6 +1289,42 @@ export default function AdminPage() {
 
               <Separator />
 
+              {viewingProcess.policies && viewingProcess.policies.length > 0 && (
+                <>
+                  <div>
+                    <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                      Policies
+                      <Badge variant="secondary" className="text-xs">
+                        {viewingProcess.policies.length}
+                      </Badge>
+                    </h4>
+                    <div className="space-y-2">
+                      {viewingProcess.policies.map((policy, index) => (
+                        <div key={policy.policy_id || index} className="p-3 rounded bg-secondary/50">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-muted-foreground capitalize">
+                              {policy.type.replace("-", " ")}
+                            </span>
+                            <Badge 
+                              variant={
+                                policy.severity === "high" ? "destructive" : 
+                                policy.severity === "medium" ? "default" : 
+                                "secondary"
+                              } 
+                              className="text-[10px] h-5"
+                            >
+                              {policy.severity}
+                            </Badge>
+                          </div>
+                          <p className="text-sm">{policy.policy_text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <Separator />
+                </>
+              )}
+              
               <div>
                 <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
                   Risk Definitions
@@ -1245,7 +1401,7 @@ export default function AdminPage() {
                   value={editForm.description}
                   onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                   placeholder="Enter process description"
-                  className="min-h-[80px] resize-none"
+                  className="min-h-20 resize-none"
                 />
               </div>
             </div>
@@ -1389,7 +1545,7 @@ export default function AdminPage() {
                         <Textarea
                           value={risk.risk_definition}
                           onChange={(e) => updateEditRisk(index, { risk_definition: e.target.value })}
-                          className="min-h-[70px] text-sm"
+                          className="min-h-17.5 text-sm"
                         />
                       </div>
                       <div className="grid gap-2 sm:grid-cols-3">
