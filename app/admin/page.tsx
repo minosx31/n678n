@@ -137,8 +137,8 @@ export default function AdminPage() {
     const p = process as any
     const formDef = p.form_definition || p.formDefinition
     const fields = formDef?.fields ?? []
-    return fields.map((f: Record<string, unknown>) => ({
-      field_id: f.field_id || f.fieldId || f.key,
+    return fields.map((f: Record<string, unknown>, i: number) => ({
+      field_id: `${ f.field_id || f.fieldId || f.key }_${i}`,
       key: f.key || f.field_id || f.fieldId,
       label: f.label,
       type: f.type,
